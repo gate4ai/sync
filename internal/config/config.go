@@ -130,17 +130,43 @@ func (c *Config) RemoveFolder(id string) {
 	c.Folders = out
 }
 
+// dir is where gate4ai-sync keeps everything of its own: the config file
+// and, alongside it, one sync manifest per folder. $GATE4AI_SYNC_CONFIG
+// overrides just the config file's own path (for tests); manifests always
+// follow $GATE4AI_SYNC_DIR or the OS default.
+func dir() (string, error) {
+	if d := os.Getenv("GATE4AI_SYNC_DIR"); d != "" {
+		return d, nil
+	}
+	d, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(d, "gate4ai-sync"), nil
+}
+
 // path returns the config file location, honoring $GATE4AI_SYNC_CONFIG for
 // tests and creating the parent directory as needed.
 func path() (string, error) {
 	if p := os.Getenv("GATE4AI_SYNC_CONFIG"); p != "" {
 		return p, nil
 	}
-	dir, err := os.UserConfigDir()
+	d, err := dir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "gate4ai-sync", "config.json"), nil
+	return filepath.Join(d, "config.json"), nil
+}
+
+// ManifestPath is where a folder's own sync manifest lives — see
+// internal/syncengine.Manifest. One file per folder ID, so removing a
+// folder and adding a different one never reads stale state.
+func ManifestPath(folderID string) (string, error) {
+	d, err := dir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(d, "manifests", folderID+".json"), nil
 }
 
 // Load reads the config file, creating a fresh one (with a new ClientID) if

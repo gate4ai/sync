@@ -55,6 +55,25 @@ func TestSaveAndLoadRoundTrip(t *testing.T) {
 	}
 }
 
+func TestManifestPathIsOnePerFolderUnderTheConfiguredDir(t *testing.T) {
+	t.Setenv("GATE4AI_SYNC_DIR", t.TempDir())
+
+	a, err := ManifestPath("folder-a")
+	if err != nil {
+		t.Fatalf("ManifestPath: %v", err)
+	}
+	b, err := ManifestPath("folder-b")
+	if err != nil {
+		t.Fatalf("ManifestPath: %v", err)
+	}
+	if a == b {
+		t.Errorf("two different folders got the same manifest path: %q", a)
+	}
+	if filepath.Base(a) != "folder-a.json" {
+		t.Errorf("ManifestPath(folder-a) = %q, want it to end in folder-a.json", a)
+	}
+}
+
 func TestFolderLookupSetAndRemove(t *testing.T) {
 	t.Setenv("GATE4AI_SYNC_CONFIG", filepath.Join(t.TempDir(), "config.json"))
 	cfg, err := Load()
