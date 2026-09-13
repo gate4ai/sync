@@ -1,0 +1,77 @@
+# Action versions match gate4ai/server's own ci.yml, checked at source there
+# on 02.09.2026 — same ecosystem, same team, no reason for this repo to pin
+# different (possibly stale) versions of the same actions.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.27.1"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "not gofmt-clean:"; echo "$unformatted"; exit 1
+          fi
+      - run: go vet ./...
+      - name: go mod tidy is a no-op
+        run: |
+          go mod tidy -diff || {
+            echo "go.mod/go.sum are not tidy; run 'go mod tidy'"; exit 1;
+          }
+      - uses: golangci/golangci-lint-action@v9.3.0
+        with:
+          version: v2.13.2
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      # CGO_ENABLED=0 here too: a test suite that only passes with cgo
+      # would not catch a regression the whole point of this client is
+      # to avoid — see CLAUDE.md.
+      - run: CGO_ENABLED=0 go test ./...
+
+  # No CGO on any target, by design (issue #38: "чистое Go-приложение без
+  # CGO"). Building here for all three with CGO_ENABLED=0 is the actual
+  # guarantee — the tray library was chosen because it needs none, not
+  # because we assumed so from its README.
+  build:
+    strategy:
+      matrix:
+        goos: [linux, windows, darwin]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: amd64
+        run: go build -o /dev/null ./...

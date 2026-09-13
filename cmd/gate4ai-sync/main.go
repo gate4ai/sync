@@ -6,6 +6,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"sync"
@@ -22,17 +24,24 @@ import (
 
 func main() {
 	log := logging.New(os.Stderr)
+	if err := run(log); err != nil {
+		log.Error(err.Error())
+		os.Exit(1)
+	}
+}
 
+// run holds every early-exit path behind a single os.Exit in main, so no
+// defer (cancel, stopSignals) is ever silently skipped by one buried deep
+// in this function.
+func run(log *slog.Logger) error {
 	cfg, err := config.Load()
 	if err != nil {
-		log.Error("load config", "err", err)
-		os.Exit(1)
+		return fmt.Errorf("load config: %w", err)
 	}
 	var mu sync.Mutex
 	saveConfig := func() error { return cfg.Save() }
 	if err := saveConfig(); err != nil {
-		log.Error("save config", "err", err)
-		os.Exit(1)
+		return fmt.Errorf("save config: %w", err)
 	}
 	log.Info("gate4ai-sync starting", "client_id", cfg.ClientID, "linked", cfg.Linked)
 
@@ -57,8 +66,7 @@ func main() {
 		Log: log,
 	}
 	if err := ui.Start(); err != nil {
-		log.Error("start local web UI", "err", err)
-		os.Exit(1)
+		return fmt.Errorf("start local web UI: %w", err)
 	}
 	settingsURL := "http://" + ui.Addr() + "/"
 	log.Info("settings UI listening", "url", settingsURL)
@@ -80,7 +88,7 @@ func main() {
 		cancel()
 		_ = ui.Shutdown(context.Background())
 	}, log); err != nil {
-		log.Error("tray", "err", err)
-		os.Exit(1)
+		return fmt.Errorf("tray: %w", err)
 	}
+	return nil
 }

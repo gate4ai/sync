@@ -1,0 +1,38 @@
+# golangci-lint v2 configuration.
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - errorlint
+    - gocritic
+    - misspell
+    - nilerr
+    - noctx
+    - predeclared
+    - revive
+    - sqlclosecheck
+    - unconvert
+    - wastedassign
+
+  settings:
+    revive:
+      rules:
+        - name: exported
+          disabled: true
+
+  exclusions:
+    rules:
+      # Table-driven tests read better without every error wrapped. bodyclose
+      # cannot follow a response through a fixture helper that closes it in
+      # t.Cleanup, which is how every request in the WebDAV suite is made.
+      - path: _test\.go
+        linters:
+          - errcheck
+          - noctx
+          - bodyclose
+
+formatters:
+  enable:
+    - gofmt

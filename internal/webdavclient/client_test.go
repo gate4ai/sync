@@ -2,6 +2,7 @@ package webdavclient_test
 
 import (
 	"encoding/xml"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -184,7 +185,7 @@ func TestPutGetRoundTrip(t *testing.T) {
 func TestGetMissingIsErrNotFound(t *testing.T) {
 	srv, _ := newFakeServer(t)
 	c := newClient(srv.URL)
-	if _, err := c.Get(t.Context(), "nope.md"); err != webdavclient.ErrNotFound {
+	if _, err := c.Get(t.Context(), "nope.md"); !errors.Is(err, webdavclient.ErrNotFound) {
 		t.Fatalf("Get missing = %v, want ErrNotFound", err)
 	}
 }
