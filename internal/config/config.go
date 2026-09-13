@@ -10,10 +10,10 @@ import (
 	"path/filepath"
 )
 
-// newID returns a random UUIDv4 string. Written by hand instead of pulling
-// in a dependency for something this small (see CLAUDE.md's "минимум
-// зависимостей").
-func newID() string {
+// NewID returns a random UUIDv4 string — used for both ClientID and each
+// Folder's ID. Written by hand instead of pulling in a dependency for
+// something this small (see CLAUDE.md's "минимум зависимостей").
+func NewID() string {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		panic(err) // crypto/rand failing means the OS RNG is broken
@@ -23,7 +23,10 @@ func newID() string {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
-// Folder is one locally synced directory.
+// Folder is one locally synced directory. Each one gets its own mount and
+// its own WebDAV credential on the server (docs/sync-api.md in
+// gate4ai/server) — a credential always opens exactly one mount there, so
+// there is one per folder rather than one shared across all of them.
 type Folder struct {
 	// ID is a stable identifier minted once when the folder is first added.
 	// It never changes, even if the folder is reordered, removed and
@@ -31,30 +34,100 @@ type Folder struct {
 	// the folder's name in the vault stable across those events.
 	ID   string `json:"id"`
 	Path string `json:"path"`
+
+	// Slug, Username and Secret are empty until this folder's mount is
+	// registered (POST /api/sync/v1/mounts) — which cannot happen before
+	// the client itself is linked to a vault. See Registered.
+	Slug     string `json:"slug,omitempty"`
+	Username string `json:"username,omitempty"`
+	Secret   string `json:"secret,omitempty"`
+}
+
+// Registered reports whether this folder has its own mount and credential
+// yet.
+func (f Folder) Registered() bool {
+	return f.Username != "" && f.Secret != ""
 }
 
 // Config is the client's persisted state: identity, folder selection, and
-// the WebDAV credential obtained through pairing. There are no profiles or
-// overrides — one file, one shape.
+// what pairing produced. There are no profiles or overrides — one file,
+// one shape.
 type Config struct {
 	// ClientID is generated once on first run and never changes; it is the
 	// identifier the pairing flow (docs/sync-api.md in gate4ai/server) uses
-	// to link this installation to a server-side vault.
+	// to link this installation to a server-side vault, and the bearer the
+	// control API accepts afterward.
 	ClientID string   `json:"client_id"`
 	Folders  []Folder `json:"folders"`
 
 	ServerURL string `json:"server_url,omitempty"`
-	Username  string `json:"username,omitempty"`
-	Secret    string `json:"secret,omitempty"`
+	// CabinetURL is where /link lives — a different host from ServerURL
+	// (the cabinet, not the WebDAV/control-API host).
+	CabinetURL string `json:"cabinet_url,omitempty"`
+	// Linked is set once pairing (the /link page) has attached ClientID to
+	// a vault — see docs/sync-api.md's pairing_status. It says nothing
+	// about any individual folder's own registration; see Folder.Registered
+	// for that.
+	Linked    bool   `json:"linked,omitempty"`
 	VaultSlug string `json:"vault_slug,omitempty"`
 
 	ProxyURL string `json:"proxy_url,omitempty"`
 }
 
-// Paired reports whether pairing has completed and the client holds a
-// WebDAV credential.
-func (c *Config) Paired() bool {
-	return c.Username != "" && c.Secret != ""
+// DefaultServerURL is used when ServerURL is unset — a fresh config, or one
+// from before this field existed.
+const DefaultServerURL = "https://dav.gate4.ai"
+
+// EffectiveServerURL is ServerURL, or DefaultServerURL when it is unset.
+func (c *Config) EffectiveServerURL() string {
+	if c.ServerURL == "" {
+		return DefaultServerURL
+	}
+	return c.ServerURL
+}
+
+// DefaultCabinetURL is used when CabinetURL is unset.
+const DefaultCabinetURL = "https://gate4.ai"
+
+// EffectiveCabinetURL is CabinetURL, or DefaultCabinetURL when it is unset.
+func (c *Config) EffectiveCabinetURL() string {
+	if c.CabinetURL == "" {
+		return DefaultCabinetURL
+	}
+	return c.CabinetURL
+}
+
+// Folder looks up a folder by id.
+func (c *Config) Folder(id string) (Folder, bool) {
+	for _, f := range c.Folders {
+		if f.ID == id {
+			return f, true
+		}
+	}
+	return Folder{}, false
+}
+
+// SetFolder replaces the folder with the same ID, if there is one.
+func (c *Config) SetFolder(f Folder) {
+	for i := range c.Folders {
+		if c.Folders[i].ID == f.ID {
+			c.Folders[i] = f
+			return
+		}
+	}
+}
+
+// RemoveFolder drops a folder from the list. It does not disable its mount
+// on the server — the caller (the sync loop) does that first, since the
+// mount id is what tells the server which files to delete.
+func (c *Config) RemoveFolder(id string) {
+	out := c.Folders[:0]
+	for _, f := range c.Folders {
+		if f.ID != id {
+			out = append(out, f)
+		}
+	}
+	c.Folders = out
 }
 
 // path returns the config file location, honoring $GATE4AI_SYNC_CONFIG for
@@ -79,7 +152,7 @@ func Load() (*Config, error) {
 	}
 	data, err := os.ReadFile(p)
 	if errors.Is(err, os.ErrNotExist) {
-		return &Config{ClientID: newID()}, nil
+		return &Config{ClientID: NewID()}, nil
 	}
 	if err != nil {
 		return nil, err
@@ -89,7 +162,7 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	if cfg.ClientID == "" {
-		cfg.ClientID = newID()
+		cfg.ClientID = NewID()
 	}
 	return &cfg, nil
 }

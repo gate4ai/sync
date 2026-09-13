@@ -15,8 +15,11 @@ func TestLoadCreatesFreshConfigWithID(t *testing.T) {
 	if cfg.ClientID == "" {
 		t.Fatal("expected a generated ClientID")
 	}
-	if cfg.Paired() {
-		t.Fatal("fresh config must not be paired")
+	if cfg.Linked {
+		t.Fatal("fresh config must not be linked")
+	}
+	if cfg.EffectiveServerURL() != DefaultServerURL {
+		t.Errorf("EffectiveServerURL = %q, want the default", cfg.EffectiveServerURL())
 	}
 }
 
@@ -27,8 +30,8 @@ func TestSaveAndLoadRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	cfg.Folders = append(cfg.Folders, Folder{ID: "f1", Path: "/tmp/docs"})
-	cfg.Username, cfg.Secret, cfg.VaultSlug = "u", "s", "home-pc"
+	cfg.Folders = append(cfg.Folders, Folder{ID: "f1", Path: "/tmp/docs", Username: "u", Secret: "s", Slug: "documents"})
+	cfg.Linked, cfg.VaultSlug = true, "home-pc"
 
 	if err := cfg.Save(); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -44,8 +47,37 @@ func TestSaveAndLoadRoundTrip(t *testing.T) {
 	if len(reloaded.Folders) != 1 || reloaded.Folders[0].Path != "/tmp/docs" {
 		t.Errorf("folders not persisted: %+v", reloaded.Folders)
 	}
-	if !reloaded.Paired() {
-		t.Error("expected reloaded config to be paired")
+	if !reloaded.Linked {
+		t.Error("expected reloaded config to be linked")
+	}
+	if !reloaded.Folders[0].Registered() {
+		t.Error("expected the reloaded folder to be registered")
+	}
+}
+
+func TestFolderLookupSetAndRemove(t *testing.T) {
+	t.Setenv("GATE4AI_SYNC_CONFIG", filepath.Join(t.TempDir(), "config.json"))
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	cfg.Folders = []Folder{{ID: "a", Path: "/a"}, {ID: "b", Path: "/b"}}
+
+	if _, ok := cfg.Folder("a"); !ok {
+		t.Fatal("Folder(a) not found")
+	}
+	cfg.SetFolder(Folder{ID: "a", Path: "/a", Username: "u", Secret: "s"})
+	a, _ := cfg.Folder("a")
+	if !a.Registered() {
+		t.Error("SetFolder did not update the folder")
+	}
+
+	cfg.RemoveFolder("a")
+	if _, ok := cfg.Folder("a"); ok {
+		t.Error("RemoveFolder did not remove it")
+	}
+	if len(cfg.Folders) != 1 || cfg.Folders[0].ID != "b" {
+		t.Errorf("Folders = %+v, want only b left", cfg.Folders)
 	}
 }
 

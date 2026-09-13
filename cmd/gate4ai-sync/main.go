@@ -24,8 +24,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	log.Info("gate4ai-sync starting", "client_id", cfg.ClientID, "paired", cfg.Paired())
+	log.Info("gate4ai-sync starting", "client_id", cfg.ClientID, "linked", cfg.Linked)
 
 	// Sync engine, local web UI, tray icon and autostart wiring land in
-	// later stages (Sy1-Sy4, see docs/sync-api.md and the project plan).
+	// later stages (Sy2-Sy4, see docs/sync-api.md and the project plan).
 }
