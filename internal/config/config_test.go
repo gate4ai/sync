@@ -55,6 +55,18 @@ func TestSaveAndLoadRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSyncHostEnvOverridesBothURLsAndTakesPriorityOverSavedOnes(t *testing.T) {
+	t.Setenv("GATE4AI_SYNC_HOST", "test.gate4.ai")
+	cfg := &Config{ServerURL: "https://dav.gate4.ai", CabinetURL: "https://gate4.ai"}
+
+	if got := cfg.EffectiveServerURL(); got != "https://dav.test.gate4.ai" {
+		t.Errorf("EffectiveServerURL = %q, want the env override", got)
+	}
+	if got := cfg.EffectiveCabinetURL(); got != "https://test.gate4.ai" {
+		t.Errorf("EffectiveCabinetURL = %q, want the env override", got)
+	}
+}
+
 func TestManifestPathIsOnePerFolderUnderTheConfiguredDir(t *testing.T) {
 	t.Setenv("GATE4AI_SYNC_DIR", t.TempDir())
 

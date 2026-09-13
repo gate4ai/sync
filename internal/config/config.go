@@ -74,12 +74,33 @@ type Config struct {
 	ProxyURL string `json:"proxy_url,omitempty"`
 }
 
+// DefaultHost is which gate4.ai deployment the client talks to when nothing
+// says otherwise — production. $GATE4AI_SYNC_HOST overrides it for the
+// whole process (e.g. "test.gate4.ai" for the staging stand): set once at
+// launch, never written to config.json, so switching back is just unsetting
+// the variable rather than editing a file that quietly kept the override.
+// It takes priority over ServerURL/CabinetURL below, which exist for a
+// config file that already pinned an explicit URL before this variable did.
+const DefaultHost = "gate4.ai"
+
+func effectiveHost() string {
+	if h := os.Getenv("GATE4AI_SYNC_HOST"); h != "" {
+		return h
+	}
+	return ""
+}
+
 // DefaultServerURL is used when ServerURL is unset — a fresh config, or one
 // from before this field existed.
-const DefaultServerURL = "https://dav.gate4.ai"
+const DefaultServerURL = "https://dav." + DefaultHost
 
-// EffectiveServerURL is ServerURL, or DefaultServerURL when it is unset.
+// EffectiveServerURL is, in order: "https://dav.$GATE4AI_SYNC_HOST" if that
+// variable is set, else ServerURL if that was ever saved, else
+// DefaultServerURL.
 func (c *Config) EffectiveServerURL() string {
+	if h := effectiveHost(); h != "" {
+		return "https://dav." + h
+	}
 	if c.ServerURL == "" {
 		return DefaultServerURL
 	}
@@ -87,10 +108,13 @@ func (c *Config) EffectiveServerURL() string {
 }
 
 // DefaultCabinetURL is used when CabinetURL is unset.
-const DefaultCabinetURL = "https://gate4.ai"
+const DefaultCabinetURL = "https://" + DefaultHost
 
-// EffectiveCabinetURL is CabinetURL, or DefaultCabinetURL when it is unset.
+// EffectiveCabinetURL mirrors EffectiveServerURL for the cabinet host.
 func (c *Config) EffectiveCabinetURL() string {
+	if h := effectiveHost(); h != "" {
+		return "https://" + h
+	}
 	if c.CabinetURL == "" {
 		return DefaultCabinetURL
 	}
