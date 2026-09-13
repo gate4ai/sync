@@ -47,6 +47,13 @@ func Run(settingsURL string, onQuit func(), log *slog.Logger) error {
 		os.Exit(0)
 	})
 
-	tray.SetIcon(iconPNG).SetTooltip("gate4.ai sync").SetMenu(menu)
+	// Show is not decoration: on Linux the SNI protocol this library speaks
+	// (internal/platform_linux.go in gogpu/systray) starts every icon in
+	// "Passive" status and only "Active" ones are guaranteed visible — the
+	// Ubuntu AppIndicators extension in particular hides Passive icons
+	// rather than showing them collapsed. Without this call the tray
+	// registers correctly on D-Bus (Introspect and the menu both work) but
+	// never actually appears in the panel.
+	tray.SetIcon(iconPNG).SetTooltip("gate4.ai sync").SetMenu(menu).Show()
 	return tray.Run()
 }
