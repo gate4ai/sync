@@ -76,29 +76,39 @@ const browseHTML = `<!doctype html>
 <title>Choose a folder — gate4.ai sync</title>
 <style>
 body { font: 14px system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; }
-.entry { padding: .3rem 0; }
-.path { color: #666; font-size: .85rem; }
+.path { color: #666; font-size: .85rem; margin-bottom: 1rem; }
+.entry { display: flex; justify-content: space-between; align-items: center; padding: .4rem 0; border-bottom: 1px solid #eee; }
+.entry .name { overflow-wrap: anywhere; }
+.entry form { flex: none; margin-left: 1rem; }
+.synced { color: #666; font-size: .85rem; flex: none; margin-left: 1rem; }
+.up { padding: .4rem 0; }
+button, .btn { font: inherit; padding: .3rem .8rem; }
+.btn { display: inline-block; text-decoration: none; color: inherit; border: 1px solid #ccc; border-radius: 3px; }
+.acts { margin-top: 1.5rem; }
 </style>
 </head>
 <body>
 <h1>Choose a folder</h1>
 <p class="path">{{.Path}}</p>
 
-<form method="post" action="/folders">
-  <input type="hidden" name="path" value="{{.Path}}">
-  <button type="submit">Sync this folder</button>
-</form>
-
-<p>
-{{if .Parent}}<a href="/browse?path={{.Parent}}">.. (up)</a>{{end}}
-</p>
+{{if .Parent}}<div class="up"><a href="/browse?path={{.Parent}}">.. (up)</a></div>{{end}}
 {{range .Entries}}
-<div class="entry"><a href="/browse?path={{.Path}}">{{.Name}}/</a></div>
+<div class="entry">
+  <a class="name" href="/browse?path={{.Path}}">{{.Name}}/</a>
+  {{if .Synced}}
+  <span class="synced">Already syncing</span>
+  {{else}}
+  <form method="post" action="/folders">
+    <input type="hidden" name="path" value="{{.Path}}">
+    <button type="submit">Sync</button>
+  </form>
+  {{end}}
+</div>
 {{else}}
 <p>No subfolders here.</p>
 {{end}}
 
-<p><a href="/">&larr; Back</a></p>
+<p class="acts"><a class="btn" href="/">Cancel</a></p>
 </body>
 </html>
 `

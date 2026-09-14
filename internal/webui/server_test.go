@@ -232,4 +232,38 @@ func TestBrowseListsSubdirectoriesOnly(t *testing.T) {
 	if strings.Contains(string(body), "file.txt") {
 		t.Error("browse page listed a plain file")
 	}
+	if !strings.Contains(string(body), ">Sync<") {
+		t.Errorf("browse page is missing a per-row Sync button:\n%s", body)
+	}
+	if strings.Contains(string(body), "Sync this folder") {
+		t.Error("browse page still has the old whole-folder Sync button")
+	}
+	if !strings.Contains(string(body), `>Cancel<`) {
+		t.Error("browse page is missing a Cancel action")
+	}
+	if strings.Contains(string(body), "&larr; Back") {
+		t.Error("browse page still has the old Back link")
+	}
+}
+
+func TestBrowseKeepsAnAlreadySyncedFolderListedWithoutASyncButton(t *testing.T) {
+	f := newFixture(t)
+	dir := t.TempDir()
+	if err := os.Mkdir(dir+"/already", 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	f.cfg.Folders = []config.Folder{{ID: "f1", Path: dir + "/already"}}
+
+	resp, err := http.Get(f.url("/browse?path=" + dir))
+	if err != nil {
+		t.Fatalf("GET /browse: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "already/") {
+		t.Errorf("browse page dropped an already-synced folder from the listing:\n%s", body)
+	}
+	if !strings.Contains(string(body), "Already syncing") {
+		t.Errorf("browse page does not mark the already-synced folder:\n%s", body)
+	}
 }

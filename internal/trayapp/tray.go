@@ -1,7 +1,6 @@
-// Package trayapp is the tray icon — the only UI this client draws itself,
-// and it has exactly one menu item: "Open settings", which opens the local
-// web UI (internal/webui) in the default browser. See the issue this
-// client implements: "the tray's only menu item is 'Open settings'".
+// Package trayapp is the tray icon — the only UI this client draws itself.
+// Its menu opens a browser to one of two places: the local web UI
+// (internal/webui) for settings, or the cabinet on gate4.ai directly.
 package trayapp
 
 import (
@@ -20,15 +19,22 @@ var iconPNG []byte
 // doc comment for why this package does that itself rather than returning.
 // settingsURL is opened in the default browser when "Open settings" is
 // clicked — the caller builds it from the webui server's actual port.
-// onQuit runs synchronously before exit, for whatever cleanup the caller
-// needs (nothing is required; the sync loop's own manifest writes are
-// already durable after every poll, not just at shutdown).
-func Run(settingsURL string, onQuit func(), log *slog.Logger) error {
+// cabinetURL is where "Open gate4.ai" goes — the account's cabinet, not the
+// local settings page. onQuit runs synchronously before exit, for whatever
+// cleanup the caller needs (nothing is required; the sync loop's own
+// manifest writes are already durable after every poll, not just at
+// shutdown).
+func Run(settingsURL, cabinetURL string, onQuit func(), log *slog.Logger) error {
 	tray := systray.New()
 	menu := systray.NewMenu()
 	menu.Add("Open settings", func() {
 		if err := browser.Open(settingsURL); err != nil {
 			log.Error("open settings in browser", "err", err)
+		}
+	})
+	menu.Add("Open gate4.ai", func() {
+		if err := browser.Open(cabinetURL); err != nil {
+			log.Error("open cabinet in browser", "err", err)
 		}
 	})
 	menu.AddSeparator()

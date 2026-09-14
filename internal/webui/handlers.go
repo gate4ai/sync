@@ -90,16 +90,24 @@ func humanInterval(seconds int) string {
 }
 
 // browse is the HTML file picker: os.ReadDir, one level, with breadcrumbs.
-// No native dialogs — see the package comment.
+// No native dialogs — see the package comment. Each listed subfolder gets
+// its own Sync button rather than the page offering one action for
+// whichever folder happens to be open — a folder worth syncing is usually
+// a child of the one you're browsing, not the browsing point itself, and a
+// button per row skips the extra navigate-in-then-confirm step.
 type browseEntry struct {
 	Name, Path string
+	// Synced is true when this exact path is already a configured folder —
+	// it keeps showing up in the listing rather than being hidden, just
+	// with its status in place of a Sync button, so browsing never looks
+	// like it silently dropped something already set up.
+	Synced bool
 }
 
 type browsePage struct {
-	Path     string
-	Parent   string
-	Entries  []browseEntry
-	FolderID string // set when browsing to replace an existing folder's path — unused in MVP, reserved
+	Path    string
+	Parent  string
+	Entries []browseEntry
 }
 
 func (s *Server) browse(w http.ResponseWriter, r *http.Request) {
@@ -113,6 +121,13 @@ func (s *Server) browse(w http.ResponseWriter, r *http.Request) {
 	}
 	dir = filepath.Clean(dir)
 
+	s.Mu.Lock()
+	synced := make(map[string]bool, len(s.Config.Folders))
+	for _, f := range s.Config.Folders {
+		synced[f.Path] = true
+	}
+	s.Mu.Unlock()
+
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		s.render(w, "browse", browsePage{Path: dir, Parent: filepath.Dir(dir)})
@@ -123,7 +138,8 @@ func (s *Server) browse(w http.ResponseWriter, r *http.Request) {
 		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
 			continue
 		}
-		rows = append(rows, browseEntry{Name: e.Name(), Path: filepath.Join(dir, e.Name())})
+		path := filepath.Join(dir, e.Name())
+		rows = append(rows, browseEntry{Name: e.Name(), Path: path, Synced: synced[path]})
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].Name < rows[j].Name })
 
