@@ -13,6 +13,7 @@ import (
 
 	"github.com/gate4ai/sync/internal/config"
 	"github.com/gate4ai/sync/internal/controlclient"
+	"github.com/gate4ai/sync/internal/status"
 	"github.com/gate4ai/sync/internal/syncengine"
 	"github.com/gate4ai/sync/internal/webdavclient"
 )
@@ -24,10 +25,11 @@ const pendingInterval = 15 * time.Second
 
 // Run blocks until ctx is done, running one iteration immediately and then
 // on whatever interval the server's settings (or pendingInterval, before
-// that is known) say.
-func Run(ctx context.Context, cfg *config.Config, mu *sync.Mutex, saveConfig func() error, log *slog.Logger) {
+// that is known) say. st records the outcome of each iteration — see
+// internal/status — for the local web UI's "Status" line.
+func Run(ctx context.Context, cfg *config.Config, mu *sync.Mutex, saveConfig func() error, st *status.Status, log *slog.Logger) {
 	for {
-		interval := runOnce(ctx, cfg, mu, saveConfig, log)
+		interval := runOnce(ctx, cfg, mu, saveConfig, st, log)
 		select {
 		case <-ctx.Done():
 			return
@@ -36,34 +38,36 @@ func Run(ctx context.Context, cfg *config.Config, mu *sync.Mutex, saveConfig fun
 	}
 }
 
-func runOnce(ctx context.Context, cfg *config.Config, mu *sync.Mutex, saveConfig func() error, log *slog.Logger) time.Duration {
+func runOnce(ctx context.Context, cfg *config.Config, mu *sync.Mutex, saveConfig func() error, st *status.Status, log *slog.Logger) time.Duration {
 	mu.Lock()
 	clientID, serverURL, linked := cfg.ClientID, cfg.EffectiveServerURL(), cfg.Linked
 	mu.Unlock()
 	control := &controlclient.Client{BaseURL: serverURL, ClientID: clientID}
 
 	if !linked {
-		status, err := control.PairingStatus(ctx)
+		pairing, err := control.PairingStatus(ctx)
 		if err != nil {
 			log.Warn("read pairing status", "err", err)
+			st.RecordError(err, time.Now())
 			return pendingInterval
 		}
-		if status.Status != "linked" {
+		if pairing.Status != "linked" {
 			return pendingInterval
 		}
 		mu.Lock()
-		cfg.Linked, cfg.VaultSlug = true, status.VaultSlug
+		cfg.Linked, cfg.VaultSlug = true, pairing.VaultSlug
 		err = saveConfig()
 		mu.Unlock()
 		if err != nil {
 			log.Error("save config after linking", "err", err)
 		}
-		log.Info("linked to vault", "vault_slug", status.VaultSlug)
+		log.Info("linked to vault", "vault_slug", pairing.VaultSlug)
 	}
 
 	settings, err := control.Settings(ctx)
 	if err != nil {
 		log.Warn("read settings", "err", err)
+		st.RecordError(err, time.Now())
 		return pendingInterval
 	}
 	policy := syncengine.Policy{
@@ -75,11 +79,13 @@ func runOnce(ctx context.Context, cfg *config.Config, mu *sync.Mutex, saveConfig
 	folders := append([]config.Folder(nil), cfg.Folders...)
 	mu.Unlock()
 
+	var lastErr error
 	for _, f := range folders {
 		if !f.Registered() {
 			f, err = register(ctx, control, saveConfig, cfg, mu, f)
 			if err != nil {
 				log.Error("register folder", "path", f.Path, "err", err)
+				lastErr = err
 				continue
 			}
 		}
@@ -87,12 +93,14 @@ func runOnce(ctx context.Context, cfg *config.Config, mu *sync.Mutex, saveConfig
 		manifestPath, err := config.ManifestPath(f.ID)
 		if err != nil {
 			log.Error("resolve manifest path", "folder", f.Path, "err", err)
+			lastErr = err
 			continue
 		}
 		dav := &webdavclient.Client{BaseURL: serverURL, Username: f.Username, Secret: f.Secret}
 		res, err := syncengine.SyncOnce(ctx, dav, f.Path, manifestPath, policy)
 		if err != nil {
 			log.Error("sync folder", "path", f.Path, "err", err)
+			lastErr = err
 			continue
 		}
 		if res.Uploaded+res.Downloaded+res.DeletedLocal+res.DeletedRemote+res.Skipped > 0 {
@@ -101,6 +109,13 @@ func runOnce(ctx context.Context, cfg *config.Config, mu *sync.Mutex, saveConfig
 				"deleted_local", res.DeletedLocal, "deleted_remote", res.DeletedRemote,
 				"skipped", res.Skipped)
 		}
+	}
+
+	now := time.Now()
+	if lastErr != nil {
+		st.RecordError(lastErr, now)
+	} else {
+		st.RecordSuccess(now)
 	}
 
 	if settings.PollIntervalSeconds <= 0 {

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/gate4ai/sync/internal/config"
 )
@@ -18,16 +19,45 @@ type folderRow struct {
 type homePage struct {
 	Linked     bool
 	VaultSlug  string
+	Status     string // "Synced 2 minutes ago" / "Error: ..." / "" before linking
 	Folders    []folderRow
-	Settings   *settingsView
+	Settings   []settingRow
 	CabinetURL string
 	ClientID   string
 }
 
-type settingsView struct {
-	AllowedExtensions string
-	MaxFileSize       string
-	PollInterval      string
+// settingRow is one line of the "Server settings" block — see its own
+// comment on why this is a list of rows rather than one packed sentence.
+type settingRow struct {
+	Name, Value string
+}
+
+// statusLine turns the loop's last-known outcome into the one sentence the
+// home page shows under "Connected to vault ...". An error takes priority
+// over the last success — a stale "synced 5 minutes ago" next to a fresh
+// failure would read as everything being fine.
+func statusLine(now time.Time, lastSync time.Time, errText string, erroredAt time.Time) string {
+	if errText != "" {
+		return fmt.Sprintf("Error %s: %s", relativeTime(now, erroredAt), errText)
+	}
+	if lastSync.IsZero() {
+		return "Not synced yet"
+	}
+	return "Synced " + relativeTime(now, lastSync)
+}
+
+func relativeTime(now, t time.Time) string {
+	d := now.Sub(t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%d min ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%d h ago", int(d.Hours()))
+	default:
+		return t.Format("2006-01-02 15:04")
+	}
 }
 
 // folderRows builds the "Folders" list rows shared by the home page and the
@@ -61,13 +91,17 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) {
 		ClientID:   cfg.ClientID,
 		Folders:    folderRows(cfg, folders),
 	}
+	if cfg.Linked {
+		snap := s.Status.Snapshot()
+		page.Status = statusLine(time.Now(), snap.LastSync, snap.Error, snap.ErroredAt)
+	}
 
 	if cfg.Linked {
 		if settings, err := s.Control().Settings(r.Context()); err == nil {
-			page.Settings = &settingsView{
-				AllowedExtensions: joinOrAll(settings.AllowedExtensions),
-				MaxFileSize:       humanSize(settings.MaxFileSizeBytes),
-				PollInterval:      humanInterval(settings.PollIntervalSeconds),
+			page.Settings = []settingRow{
+				{Name: "Allowed types", Value: joinOrAll(settings.AllowedExtensions)},
+				{Name: "Max file size", Value: humanSize(settings.MaxFileSizeBytes)},
+				{Name: "Poll interval", Value: humanInterval(settings.PollIntervalSeconds)},
 			}
 		} else {
 			s.Log.Warn("read settings for home page", "err", err)

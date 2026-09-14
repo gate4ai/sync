@@ -18,6 +18,7 @@ import (
 	"github.com/gate4ai/sync/internal/controlclient"
 	"github.com/gate4ai/sync/internal/logging"
 	"github.com/gate4ai/sync/internal/loop"
+	"github.com/gate4ai/sync/internal/status"
 	"github.com/gate4ai/sync/internal/trayapp"
 	"github.com/gate4ai/sync/internal/webui"
 )
@@ -54,6 +55,7 @@ func run(log *slog.Logger) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	var st status.Status
 	ui := &webui.Server{
 		Config:     cfg,
 		Mu:         &mu,
@@ -63,7 +65,8 @@ func run(log *slog.Logger) error {
 			defer mu.Unlock()
 			return &controlclient.Client{BaseURL: cfg.EffectiveServerURL(), ClientID: cfg.ClientID}
 		},
-		Log: log,
+		Status: &st,
+		Log:    log,
 	}
 	if err := ui.Start(); err != nil {
 		return fmt.Errorf("start local web UI: %w", err)
@@ -71,7 +74,7 @@ func run(log *slog.Logger) error {
 	settingsURL := "http://" + ui.Addr() + "/"
 	log.Info("settings UI listening", "url", settingsURL)
 
-	go loop.Run(ctx, cfg, &mu, saveConfig, log)
+	go loop.Run(ctx, cfg, &mu, saveConfig, &st, log)
 
 	// A signal (Ctrl+C, or a service manager stopping the process) shuts
 	// down the same way the tray's own Quit item does.

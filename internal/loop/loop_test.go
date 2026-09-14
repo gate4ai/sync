@@ -14,6 +14,7 @@ import (
 
 	"github.com/gate4ai/sync/internal/config"
 	"github.com/gate4ai/sync/internal/controlclient"
+	"github.com/gate4ai/sync/internal/status"
 )
 
 // fakeServer answers both the control API and plain WebDAV — everything
@@ -72,7 +73,7 @@ func TestRunOnceDoesNothingUntilLinked(t *testing.T) {
 	cfg := &config.Config{ClientID: "c1", ServerURL: srv.URL}
 	mu := &sync.Mutex{}
 
-	interval := runOnce(t.Context(), cfg, mu, cfg.Save, slog.New(slog.DiscardHandler))
+	interval := runOnce(t.Context(), cfg, mu, cfg.Save, &status.Status{}, slog.New(slog.DiscardHandler))
 	if interval != pendingInterval {
 		t.Errorf("interval = %v, want pendingInterval before linking", interval)
 	}
@@ -97,7 +98,7 @@ func TestRunOnceLinksRegistersAndSyncsOnce(t *testing.T) {
 	mu := &sync.Mutex{}
 	fs.linked = true
 
-	interval := runOnce(t.Context(), cfg, mu, cfg.Save, slog.New(slog.DiscardHandler))
+	interval := runOnce(t.Context(), cfg, mu, cfg.Save, &status.Status{}, slog.New(slog.DiscardHandler))
 
 	if !cfg.Linked {
 		t.Fatal("Linked is still false after the server reported linked")
@@ -147,7 +148,7 @@ func TestRunOnceSkipsAnAlreadyRegisteredFolder(t *testing.T) {
 	}
 	mu := &sync.Mutex{}
 
-	runOnce(t.Context(), cfg, mu, cfg.Save, slog.New(slog.DiscardHandler))
+	runOnce(t.Context(), cfg, mu, cfg.Save, &status.Status{}, slog.New(slog.DiscardHandler))
 
 	if registerCalls != 0 {
 		t.Errorf("RegisterMount was called %d times for an already-registered folder, want 0", registerCalls)

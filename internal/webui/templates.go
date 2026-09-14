@@ -42,7 +42,10 @@ body { font: 14px system-ui, sans-serif; max-width: 640px; margin: 2rem auto; pa
 h1 { font-size: 1.2rem; }
 .folder { display: flex; justify-content: space-between; align-items: center; padding: .5rem 0; border-bottom: 1px solid #ddd; }
 .status { color: #666; font-size: .85rem; }
+.status-line { color: #666; font-size: .9rem; margin-top: .2rem; }
 .settings { color: #666; font-size: .85rem; margin: 1rem 0; }
+.setting-row { margin-top: .3rem; }
+.setting-name { display: inline-block; min-width: 9rem; font-weight: 600; color: #1a1a1a; }
 form.inline { display: inline; }
 button, input[type=submit] { font: inherit; padding: .3rem .8rem; }
 .muted { color: #666; }
@@ -54,6 +57,7 @@ button, input[type=submit] { font: inherit; padding: .3rem .8rem; }
 {{if .Linked}}
 <p>Connected to vault <strong>{{.VaultSlug}}</strong>.
   <a href="{{.CabinetURL}}" target="_blank">Open cabinet</a></p>
+<p class="status-line">Status: {{.Status}}</p>
 {{else}}
 <p class="muted">Not connected yet. Add the folders you want to sync, then press Connect.</p>
 {{end}}
@@ -64,10 +68,10 @@ button, input[type=submit] { font: inherit; padding: .3rem .8rem; }
 
 {{if .Settings}}
 <div class="settings">
-  <strong>Server settings</strong> (change these in the cabinet):<br>
-  Allowed types: {{.Settings.AllowedExtensions}} ·
-  Max file size: {{.Settings.MaxFileSize}} ·
-  Poll interval: {{.Settings.PollInterval}}
+  <strong>Server settings</strong> (change these in the cabinet):
+  {{range .Settings}}
+  <div class="setting-row"><span class="setting-name">{{.Name}}</span> {{.Value}}</div>
+  {{end}}
 </div>
 {{end}}
 

@@ -17,6 +17,7 @@ import (
 
 	"github.com/gate4ai/sync/internal/config"
 	"github.com/gate4ai/sync/internal/controlclient"
+	"github.com/gate4ai/sync/internal/status"
 )
 
 // Server is the loopback settings UI.
@@ -26,7 +27,11 @@ type Server struct {
 	// SaveConfig persists Config after a handler mutates it.
 	SaveConfig func() error
 	Control    func() *controlclient.Client
-	Log        *slog.Logger
+	// Status is the loop's own record of when it last reached the server
+	// and what, if anything, went wrong — shown as the home page's "Status"
+	// line.
+	Status *status.Status
+	Log    *slog.Logger
 
 	listener net.Listener
 	http     *http.Server

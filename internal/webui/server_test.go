@@ -2,6 +2,7 @@ package webui_test
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -10,9 +11,11 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gate4ai/sync/internal/config"
 	"github.com/gate4ai/sync/internal/controlclient"
+	"github.com/gate4ai/sync/internal/status"
 	"github.com/gate4ai/sync/internal/webui"
 )
 
@@ -46,6 +49,7 @@ type fixture struct {
 	srv     *webui.Server
 	control *fakeControlServer
 	cfg     *config.Config
+	status  *status.Status
 	saved   int
 }
 
@@ -53,7 +57,8 @@ func newFixture(t *testing.T) *fixture {
 	t.Helper()
 	controlSrv, control := newFakeControlServer(t)
 	cfg := &config.Config{ClientID: "c1"}
-	f := &fixture{control: control, cfg: cfg}
+	st := &status.Status{}
+	f := &fixture{control: control, cfg: cfg, status: st}
 
 	s := &webui.Server{
 		Config: cfg,
@@ -65,7 +70,8 @@ func newFixture(t *testing.T) *fixture {
 		Control: func() *controlclient.Client {
 			return &controlclient.Client{BaseURL: controlSrv.URL, ClientID: cfg.ClientID}
 		},
-		Log: slog.New(slog.DiscardHandler),
+		Status: st,
+		Log:    slog.New(slog.DiscardHandler),
 	}
 	if err := s.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -92,6 +98,59 @@ func TestHomeShowsUnlinkedState(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "Connect to gate4.ai") {
 		t.Error("home page is missing the connect button")
+	}
+}
+
+func TestHomeShowsSyncedStatusWhenLinked(t *testing.T) {
+	f := newFixture(t)
+	f.cfg.Linked = true
+	f.status.RecordSuccess(time.Now())
+
+	resp, err := http.Get(f.url("/"))
+	if err != nil {
+		t.Fatalf("GET /: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "Status: Synced just now") {
+		t.Errorf("home page did not show a synced status:\n%s", body)
+	}
+}
+
+func TestHomeShowsErrorStatusOverASuccessfulOne(t *testing.T) {
+	f := newFixture(t)
+	f.cfg.Linked = true
+	f.status.RecordSuccess(time.Now().Add(-time.Hour))
+	f.status.RecordError(errors.New("connection refused"), time.Now())
+
+	resp, err := http.Get(f.url("/"))
+	if err != nil {
+		t.Fatalf("GET /: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "connection refused") {
+		t.Errorf("home page did not show the error:\n%s", body)
+	}
+	if strings.Contains(string(body), "Synced") {
+		t.Errorf("home page showed a stale success next to a fresh error:\n%s", body)
+	}
+}
+
+func TestHomeShowsServerSettingsAsSeparateLabeledLines(t *testing.T) {
+	f := newFixture(t)
+	f.cfg.Linked = true
+
+	resp, err := http.Get(f.url("/"))
+	if err != nil {
+		t.Fatalf("GET /: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	for _, name := range []string{"Allowed types", "Max file size", "Poll interval"} {
+		if !strings.Contains(string(body), `class="setting-name">`+name) {
+			t.Errorf("home page is missing a labeled row for %q:\n%s", name, body)
+		}
 	}
 }
 
