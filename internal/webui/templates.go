@@ -43,7 +43,10 @@ h1 { font-size: 1.2rem; }
 .folder { display: flex; justify-content: space-between; align-items: center; padding: .5rem 0; border-bottom: 1px solid #ddd; }
 .status { color: #666; font-size: .85rem; }
 .status-line { color: #666; font-size: .9rem; margin-top: .2rem; }
+.status-line.error { color: #d32f2f; font-weight: 600; }
 .settings { color: #666; font-size: .85rem; margin: 1rem 0; }
+.settings h2 { font-size: 1rem; margin: 0 0 .3rem; }
+.settings h2 a { color: inherit; }
 .setting-row { margin-top: .3rem; }
 .setting-name { display: inline-block; min-width: 9rem; font-weight: 600; color: #1a1a1a; }
 form.inline { display: inline; }
@@ -52,12 +55,11 @@ button, input[type=submit] { font: inherit; padding: .3rem .8rem; }
 </style>
 </head>
 <body>
-<h1>gate4.ai sync</h1>
+<h1><a href="{{.HomeURL}}" target="_blank">gate4.ai</a> sync</h1>
 
 {{if .Linked}}
-<p>Connected to vault <strong>{{.VaultSlug}}</strong>.
-  <a href="{{.CabinetURL}}" target="_blank">Open cabinet</a></p>
-<p class="status-line">Status: {{.Status}}</p>
+<p>Connected to vault <strong>{{.VaultSlug}}</strong>.</p>
+<p class="status-line{{if .StatusIsError}} error{{end}}">Status: {{.Status}}</p>
 {{else}}
 <p class="muted">Not connected yet. Add the folders you want to sync, then press Connect.</p>
 {{end}}
@@ -68,7 +70,7 @@ button, input[type=submit] { font: inherit; padding: .3rem .8rem; }
 
 {{if .Settings}}
 <div class="settings">
-  <strong>Server settings</strong> (change these in the cabinet):
+  <h2><a href="{{.SettingsURL}}" target="_blank">Server settings</a></h2>
   {{range .Settings}}
   <div class="setting-row"><span class="setting-name">{{.Name}}</span> {{.Value}}</div>
   {{end}}

@@ -17,13 +17,19 @@ type folderRow struct {
 }
 
 type homePage struct {
-	Linked     bool
-	VaultSlug  string
-	Status     string // "Synced 2 minutes ago" / "Error: ..." / "" before linking
-	Folders    []folderRow
-	Settings   []settingRow
-	CabinetURL string
-	ClientID   string
+	Linked        bool
+	VaultSlug     string
+	Status        string // "Synced 2 minutes ago" / "Error: ..." / "" before linking
+	StatusIsError bool
+	Folders       []folderRow
+	Settings      []settingRow
+	CabinetURL    string
+	// SettingsURL is where the "Server settings" heading links — the
+	// vault's "Sync client" tab in the cabinet when the server has one to
+	// offer (a folder has been registered), the plain cabinet otherwise.
+	SettingsURL string
+	ClientID    string
+	HomeURL     string
 }
 
 // settingRow is one line of the "Server settings" block — see its own
@@ -85,15 +91,18 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) {
 	s.Mu.Unlock()
 
 	page := homePage{
-		Linked:     cfg.Linked,
-		VaultSlug:  cfg.VaultSlug,
-		CabinetURL: cfg.EffectiveCabinetURL(),
-		ClientID:   cfg.ClientID,
-		Folders:    folderRows(cfg, folders),
+		Linked:      cfg.Linked,
+		VaultSlug:   cfg.VaultSlug,
+		CabinetURL:  cfg.EffectiveCabinetURL(),
+		SettingsURL: cfg.EffectiveCabinetURL(),
+		ClientID:    cfg.ClientID,
+		HomeURL:     cfg.EffectiveCabinetURL(),
+		Folders:     folderRows(cfg, folders),
 	}
 	if cfg.Linked {
 		snap := s.Status.Snapshot()
 		page.Status = statusLine(time.Now(), snap.LastSync, snap.Error, snap.ErroredAt)
+		page.StatusIsError = snap.Error != ""
 	}
 
 	if cfg.Linked {
@@ -102,6 +111,9 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) {
 				{Name: "Allowed types", Value: joinOrAll(settings.AllowedExtensions)},
 				{Name: "Max file size", Value: humanSize(settings.MaxFileSizeBytes)},
 				{Name: "Poll interval", Value: humanInterval(settings.PollIntervalSeconds)},
+			}
+			if settings.SettingsURL != "" {
+				page.SettingsURL = settings.SettingsURL
 			}
 		} else {
 			s.Log.Warn("read settings for home page", "err", err)
