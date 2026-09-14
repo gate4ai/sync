@@ -12,7 +12,7 @@ import (
 
 // NewID returns a random UUIDv4 string — used for both ClientID and each
 // Folder's ID. Written by hand instead of pulling in a dependency for
-// something this small (see CLAUDE.md's "минимум зависимостей").
+// something this small (see CLAUDE.md's "minimal dependencies" rule).
 func NewID() string {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {

@@ -131,7 +131,7 @@ func TestAnEmptyRemoteListingDeletesEverythingLocalThatWasEverSynced(t *testing.
 	// has no way to tell "the server has nothing" from "the listing failed
 	// and came back empty". The poller (engine.go) must never call Plan with
 	// an empty remote map unless PROPFIND genuinely succeeded and returned
-	// nothing — see docs/sync-api.md's "PROPFIND — всё или ничего".
+	// nothing — see docs/sync-api.md's "PROPFIND is all or nothing".
 	manifest := syncengine.Manifest{"a.md": {Size: 5, ModTime: t0, ETag: `"1"`}}
 	local := map[string]syncengine.LocalState{"a.md": {Size: 5, ModTime: t0}}
 	ops := opKinds(t, syncengine.Plan(local, map[string]syncengine.RemoteState{}, manifest))

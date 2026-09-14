@@ -1,7 +1,7 @@
 // Package trayapp is the tray icon — the only UI this client draws itself,
 // and it has exactly one menu item: "Open settings", which opens the local
 // web UI (internal/webui) in the default browser. See the issue this
-// client implements: "единственный пункт меню в трее — «Открыть настройки»".
+// client implements: "the tray's only menu item is 'Open settings'".
 package trayapp
 
 import (

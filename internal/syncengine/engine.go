@@ -45,7 +45,7 @@ type Result struct {
 }
 
 // SyncOnce runs one poll cycle for one local folder against the mount dav
-// is scoped to. See docs/sync-api.md ("PROPFIND — всё или ничего"): a
+// is scoped to. See docs/sync-api.md ("PROPFIND is all or nothing"): a
 // failure listing the remote side aborts here, before the manifest is
 // touched or anything is transferred, rather than being read as "the
 // server has nothing".

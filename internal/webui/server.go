@@ -3,7 +3,7 @@
 // opened as a plain page in the system default browser. There is no native
 // GUI here at all — no dialogs, no file pickers beyond an HTML page walking
 // os.ReadDir — see the issue this client implements and CLAUDE.md's
-// "минимум интерфейса на клиенте".
+// "minimal client-side interface" rule.
 package webui
 
 import (

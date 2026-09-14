@@ -56,8 +56,8 @@ jobs:
       # to avoid — see CLAUDE.md.
       - run: CGO_ENABLED=0 go test ./...
 
-  # No CGO on any target, by design (issue #38: "чистое Go-приложение без
-  # CGO"). Building here for all three with CGO_ENABLED=0 is the actual
+  # No CGO on any target, by design (issue #38: "a pure Go application,
+  # no CGO"). Building here for all three with CGO_ENABLED=0 is the actual
   # guarantee — the tray library was chosen because it needs none, not
   # because we assumed so from its README.
   build:

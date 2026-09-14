@@ -6,7 +6,7 @@
 // client would carry code for verbs and quirks (LOCK, chunked PATCH
 // uploads, multiple Depth: infinity strategies) this server never needs,
 // and the whole point of this client is that someone can read it in one
-// sitting. See CLAUDE.md's "минимум зависимостей и логики".
+// sitting. See CLAUDE.md's "minimal dependencies and logic" rule.
 package webdavclient
 
 import (
