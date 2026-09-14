@@ -87,7 +87,7 @@ func run(log *slog.Logger) error {
 		os.Exit(0)
 	}()
 
-	if err := trayapp.Run(settingsURL, cfg.EffectiveCabinetURL(), func() {
+	if err := trayapp.Run(settingsURL, cfg.EffectiveCabinetURL(), &st, func() {
 		cancel()
 		_ = ui.Shutdown(context.Background())
 	}, log); err != nil {
