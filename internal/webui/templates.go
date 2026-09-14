@@ -4,9 +4,32 @@ package webui
 // from disk — this is a single-binary CLI tool, not a web app with a
 // deploy step that could lose a sibling assets/ directory.
 var templates = map[string]string{
-	"home":   homeHTML,
-	"browse": browseHTML,
+	"home":   homeHTML + foldersListHTML,
+	"browse": browseHTML + foldersListHTML,
 }
+
+// foldersListHTML is the "already configured" list — path, status, Remove —
+// shared by the home page and the browse page. It has to keep showing up on
+// browse too: a folder added five directories away would otherwise vanish
+// from view the moment you're browsing anywhere else looking for another
+// one to add.
+const foldersListHTML = `
+{{define "folders-list"}}
+<h2>Folders</h2>
+{{range .Folders}}
+<div class="folder">
+  <span>{{.Path}}</span>
+  <span class="status">{{.Status}}</span>
+  <form class="inline" method="post" action="/folders/remove">
+    <input type="hidden" name="id" value="{{.ID}}">
+    <button type="submit">Remove</button>
+  </form>
+</div>
+{{else}}
+<p class="muted">No folders yet.</p>
+{{end}}
+{{end}}
+`
 
 const homeHTML = `<!doctype html>
 <html lang="en">
@@ -35,19 +58,7 @@ button, input[type=submit] { font: inherit; padding: .3rem .8rem; }
 <p class="muted">Not connected yet. Add the folders you want to sync, then press Connect.</p>
 {{end}}
 
-<h2>Folders</h2>
-{{range .Folders}}
-<div class="folder">
-  <span>{{.Path}}</span>
-  <span class="status">{{.Status}}</span>
-  <form class="inline" method="post" action="/folders/remove">
-    <input type="hidden" name="id" value="{{.ID}}">
-    <button type="submit">Remove</button>
-  </form>
-</div>
-{{else}}
-<p class="muted">No folders yet.</p>
-{{end}}
+{{template "folders-list" .}}
 
 <p><a href="/browse">+ Add a folder</a></p>
 
@@ -85,10 +96,20 @@ body { font: 14px system-ui, sans-serif; max-width: 640px; margin: 2rem auto; pa
 button, .btn { font: inherit; padding: .3rem .8rem; }
 .btn { display: inline-block; text-decoration: none; color: inherit; border: 1px solid #ccc; border-radius: 3px; }
 .acts { margin-top: 1.5rem; }
+.folder { display: flex; justify-content: space-between; align-items: center; padding: .5rem 0; border-bottom: 1px solid #ddd; }
+.status { color: #666; font-size: .85rem; }
+form.inline { display: inline; }
+.muted { color: #666; }
+h2 { font-size: 1rem; margin-top: 2rem; }
+hr { border: none; border-top: 1px solid #ddd; margin: 1.5rem 0; }
 </style>
 </head>
 <body>
 <h1>Choose a folder</h1>
+
+{{template "folders-list" .}}
+<hr>
+
 <p class="path">{{.Path}}</p>
 
 {{if .Parent}}<div class="up"><a href="/browse?path={{.Parent}}">.. (up)</a></div>{{end}}

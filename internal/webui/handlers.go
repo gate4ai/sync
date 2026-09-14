@@ -30,6 +30,24 @@ type settingsView struct {
 	PollInterval      string
 }
 
+// folderRows builds the "Folders" list rows shared by the home page and the
+// browse page — see browse's own comment on why it needs this list too, not
+// just an inline marker on whichever entry happens to match.
+func folderRows(cfg config.Config, folders []config.Folder) []folderRow {
+	var rows []folderRow
+	for _, f := range folders {
+		status := "waiting to connect"
+		switch {
+		case f.Registered():
+			status = "synced as " + f.Slug
+		case cfg.Linked:
+			status = "registering…"
+		}
+		rows = append(rows, folderRow{ID: f.ID, Path: f.Path, Status: status})
+	}
+	return rows
+}
+
 func (s *Server) home(w http.ResponseWriter, r *http.Request) {
 	s.Mu.Lock()
 	cfg := *s.Config
@@ -41,16 +59,7 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) {
 		VaultSlug:  cfg.VaultSlug,
 		CabinetURL: cfg.EffectiveCabinetURL(),
 		ClientID:   cfg.ClientID,
-	}
-	for _, f := range folders {
-		status := "waiting to connect"
-		switch {
-		case f.Registered():
-			status = "synced as " + f.Slug
-		case cfg.Linked:
-			status = "registering…"
-		}
-		page.Folders = append(page.Folders, folderRow{ID: f.ID, Path: f.Path, Status: status})
+		Folders:    folderRows(cfg, folders),
 	}
 
 	if cfg.Linked {
@@ -108,6 +117,12 @@ type browsePage struct {
 	Path    string
 	Parent  string
 	Entries []browseEntry
+	// Folders is the same "already configured" list the home page shows —
+	// kept visible here too, in full (path, status, Remove), not just the
+	// inline "Already syncing" marker on a matching entry below: a folder
+	// you added five levels up would otherwise vanish from view the moment
+	// you're browsing anywhere else.
+	Folders []folderRow
 }
 
 func (s *Server) browse(w http.ResponseWriter, r *http.Request) {
@@ -122,15 +137,18 @@ func (s *Server) browse(w http.ResponseWriter, r *http.Request) {
 	dir = filepath.Clean(dir)
 
 	s.Mu.Lock()
-	synced := make(map[string]bool, len(s.Config.Folders))
-	for _, f := range s.Config.Folders {
+	cfg := *s.Config
+	folders := append([]config.Folder(nil), s.Config.Folders...)
+	s.Mu.Unlock()
+	synced := make(map[string]bool, len(folders))
+	for _, f := range folders {
 		synced[f.Path] = true
 	}
-	s.Mu.Unlock()
+	folderList := folderRows(cfg, folders)
 
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		s.render(w, "browse", browsePage{Path: dir, Parent: filepath.Dir(dir)})
+		s.render(w, "browse", browsePage{Path: dir, Parent: filepath.Dir(dir), Folders: folderList})
 		return
 	}
 	var rows []browseEntry
@@ -147,7 +165,7 @@ func (s *Server) browse(w http.ResponseWriter, r *http.Request) {
 	if parent == dir {
 		parent = ""
 	}
-	s.render(w, "browse", browsePage{Path: dir, Parent: parent, Entries: rows})
+	s.render(w, "browse", browsePage{Path: dir, Parent: parent, Entries: rows, Folders: folderList})
 }
 
 func (s *Server) addFolder(w http.ResponseWriter, r *http.Request) {

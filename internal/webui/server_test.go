@@ -246,6 +246,30 @@ func TestBrowseListsSubdirectoriesOnly(t *testing.T) {
 	}
 }
 
+func TestBrowseShowsTheFullFoldersListEvenWhenBrowsingElsewhere(t *testing.T) {
+	f := newFixture(t)
+	elsewhere := t.TempDir()
+	f.cfg.Folders = []config.Folder{
+		{ID: "f1", Path: "/home/alex/Documents/obsidian", Username: "u", Secret: "s", Slug: "obsidian"},
+	}
+
+	resp, err := http.Get(f.url("/browse?path=" + elsewhere))
+	if err != nil {
+		t.Fatalf("GET /browse: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "/home/alex/Documents/obsidian") {
+		t.Errorf("browse page dropped the configured folder while browsing elsewhere:\n%s", body)
+	}
+	if !strings.Contains(string(body), "synced as obsidian") {
+		t.Errorf("browse page is missing the folder's status:\n%s", body)
+	}
+	if !strings.Contains(string(body), `name="id" value="f1"`) {
+		t.Error("browse page is missing the Remove form for the configured folder")
+	}
+}
+
 func TestBrowseKeepsAnAlreadySyncedFolderListedWithoutASyncButton(t *testing.T) {
 	f := newFixture(t)
 	dir := t.TempDir()
