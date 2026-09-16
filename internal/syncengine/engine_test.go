@@ -217,6 +217,30 @@ func TestSyncOnceSkipsAFileOverTheSizeLimitWithoutTouchingEitherSide(t *testing.
 	}
 }
 
+func TestSyncOnceSkipsAFileMatchingIndexDenyWithoutTouchingEitherSide(t *testing.T) {
+	srv, fs := newFakeServer(t)
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, ".obsidian"), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".obsidian", "app.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatalf("write local file: %v", err)
+	}
+	manifest := filepath.Join(t.TempDir(), "manifest.json")
+
+	policy := syncengine.NewPolicy(nil, 0, []string{`(?:.*/)?\.[^/]+/.*`}, nil)
+	res, err := syncengine.SyncOnce(t.Context(), newClient(srv.URL), dir, manifest, policy)
+	if err != nil {
+		t.Fatalf("SyncOnce: %v", err)
+	}
+	if res.Uploaded != 0 || res.Skipped != 1 {
+		t.Errorf("res = %+v, want the denied file skipped and not uploaded", res)
+	}
+	if _, ok := fs.files[".obsidian/app.json"]; ok {
+		t.Error("the denied file was uploaded despite index_deny")
+	}
+}
+
 func TestSyncOnceDeletesLocallyAfterARemoteDeletion(t *testing.T) {
 	srv, fs := newFakeServer(t)
 	dir := t.TempDir()

@@ -70,10 +70,7 @@ func runOnce(ctx context.Context, cfg *config.Config, mu *sync.Mutex, saveConfig
 		st.RecordError(err, time.Now())
 		return pendingInterval
 	}
-	policy := syncengine.Policy{
-		AllowedExtensions: settings.AllowedExtensions,
-		MaxFileSizeBytes:  settings.MaxFileSizeBytes,
-	}
+	policy := syncengine.NewPolicy(settings.AllowedExtensions, settings.MaxFileSizeBytes, settings.IndexDeny, log)
 
 	mu.Lock()
 	folders := append([]config.Folder(nil), cfg.Folders...)

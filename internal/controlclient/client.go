@@ -75,6 +75,7 @@ func (c *Client) do(ctx context.Context, method, path string, body any, out any)
 type Settings struct {
 	AllowedExtensions   []string `json:"allowed_extensions"`
 	MaxFileSizeBytes    int64    `json:"max_file_size_bytes"`
+	IndexDeny           []string `json:"index_deny"`
 	PollIntervalSeconds int      `json:"poll_interval_seconds"`
 	VaultSlug           string   `json:"vault_slug"`
 	// SettingsURL is the cabinet's "Sync client" tab for this vault, or

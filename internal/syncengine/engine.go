@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/gate4ai/sync/internal/webdavclient"
@@ -21,11 +23,43 @@ type Policy struct {
 	AllowedExtensions []string
 	// MaxFileSizeBytes, 0 meaning no limit.
 	MaxFileSizeBytes int64
+	// denyRe is vault.index_deny (internal/vault/classify.go on the server),
+	// compiled once by NewPolicy. On the server it means "not indexed"; here
+	// it means the same as AllowedExtensions and MaxFileSizeBytes — "not
+	// synced" — so a path an owner keeps out of search never leaves the
+	// machine it lives on either.
+	denyRe []*regexp.Regexp
+}
+
+// NewPolicy compiles indexDeny's RE2 patterns once so allows() does not
+// recompile them per file. A pattern that fails to compile is dropped with a
+// warning rather than aborting the sync — the same "matches nothing" fallback
+// the server uses for a row saved before it validated patterns on save (see
+// vault.Indexable), so one bad pattern degrades to "not deny-filtered"
+// instead of stopping sync entirely.
+func NewPolicy(allowedExtensions []string, maxFileSizeBytes int64, indexDeny []string, log *slog.Logger) Policy {
+	p := Policy{AllowedExtensions: allowedExtensions, MaxFileSizeBytes: maxFileSizeBytes}
+	for _, pattern := range indexDeny {
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			if log != nil {
+				log.Warn("index_deny pattern does not compile, ignoring it", "pattern", pattern, "err", err)
+			}
+			continue
+		}
+		p.denyRe = append(p.denyRe, re)
+	}
+	return p
 }
 
 func (p Policy) allows(clientPath string, size int64) bool {
 	if p.MaxFileSizeBytes > 0 && size > p.MaxFileSizeBytes {
 		return false
+	}
+	for _, re := range p.denyRe {
+		if re.MatchString(clientPath) {
+			return false
+		}
 	}
 	if p.AllowedExtensions == nil {
 		return true
