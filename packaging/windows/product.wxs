@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  WiX v5 source for the Windows .msi, built in CI (.github/workflows/release.yml)
+  with `wix build` from the windows/amd64 binary. Version is patched in via
+  `-d Version=...` at build time; UpgradeCode is fixed forever so later
+  releases upgrade in place instead of installing side by side.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="gate4.ai sync"
+           Manufacturer="gate4.ai"
+           Version="$(var.Version)"
+           UpgradeCode="580495cf-360c-4df1-9afc-c54fa3a459b1">
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of gate4.ai sync is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="AppIcon" SourceFile="packaging\windows\icon.ico" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="gate4ai-sync">
+        <Component Id="MainExecutable" Guid="0c5c944d-28b4-438f-b599-03beafb051a6">
+          <File Id="MainExe" Source="dist\gate4ai-sync-windows-amd64.exe" Name="gate4ai-sync.exe" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationProgramsFolder" Name="gate4.ai sync">
+        <Component Id="ApplicationShortcut" Guid="7dfb0f9f-9c5b-4f0a-8a3f-0b8f6f3f2c1a">
+          <Shortcut Id="ApplicationStartMenuShortcut"
+                    Name="gate4.ai sync"
+                    Target="[INSTALLFOLDER]gate4ai-sync.exe"
+                    WorkingDirectory="INSTALLFOLDER"
+                    Icon="AppIcon" />
+          <RemoveFolder Id="RemoveApplicationProgramsFolder" On="uninstall" />
+          <RegistryValue Root="HKCU" Key="Software\gate4.ai\sync" Name="installed" Type="integer" Value="1" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="Main">
+      <ComponentRef Id="MainExecutable" />
+      <ComponentRef Id="ApplicationShortcut" />
+    </Feature>
+  </Package>
+</Wix>

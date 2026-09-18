@@ -1,5 +1,47 @@
 # gate4ai/sync
 
+## Installation
+
+Grab the latest release from this repo's [Releases page](../../releases). Each release
+publishes a native installer for every platform below, built by
+[release.yml](.github/workflows/release.yml).
+
+### macOS
+
+1. Download `gate4ai-sync-<version>-universal.dmg` (one build for Apple Silicon and Intel).
+2. Open it and drag **gate4.ai sync** into **Applications**.
+3. Launch it from Applications. The app is not notarized/signed with an Apple Developer ID,
+   so Gatekeeper will refuse the first launch ("cannot be opened because the developer
+   cannot be verified") — right-click the app, choose **Open**, then confirm in the dialog.
+   This is only needed once.
+4. A tray icon appears; use its "Open settings" menu item to configure sync.
+
+### Windows
+
+1. Download `gate4ai-sync-<version>-amd64.msi`.
+2. Run it. The installer is not code-signed, so SmartScreen may show "Windows protected your
+   PC" — click **More info** → **Run anyway**.
+3. It installs to `Program Files\gate4ai-sync` and adds a Start Menu shortcut.
+4. Launch **gate4.ai sync** from the Start Menu; a tray icon appears.
+
+### Ubuntu / Debian
+
+1. Download `gate4ai-sync-<version>-amd64.deb`.
+2. Install it:
+   ```
+   sudo apt install ./gate4ai-sync-<version>-amd64.deb
+   ```
+3. Launch **gate4.ai sync** from your application menu, or run `gate4ai-sync` from a
+   terminal.
+
+All three installers only place the binary — autostart on login is opt-in from the app's
+own settings page (`internal/autostart`), not something the installer sets up for you.
+
+Prefer a plain binary (other Linux distros, or you just want the file)? Every release also
+publishes the raw `gate4ai-sync-<os>-<arch>` binaries the installers are built from; every
+CI run on a branch or PR does the same under that run's **Artifacts** for un-released
+builds (see [Building](#building) below).
+
 File sync client for the gate4.ai server — a tray app for Mac, Windows and Linux, pure Go,
 no CGO.
 
@@ -50,6 +92,18 @@ go build ./cmd/gate4ai-sync
 No CGO on any of the three platforms — `CGO_ENABLED=0 GOOS={linux,windows,darwin} go build ./...`
 is checked in CI (`.github/workflows/ci.yml`).
 
+### CI-built binaries and installers
+
+- Every push to a branch other than `main`, and every pull request, runs
+  [ci.yml](.github/workflows/ci.yml)'s `build-artifacts` job, which cross-builds the three
+  plain binaries and attaches them to that workflow run's **Artifacts** — useful for a
+  tester to grab a build without waiting for a release.
+- Every push to `main` runs [release.yml](.github/workflows/release.yml): lint and test,
+  auto-increment a `vX.Y.Z` tag (patch bump over the latest existing tag), build the
+  installers described in [Installation](#installation) above (`packaging/nfpm`,
+  `packaging/windows`, `packaging/macos` hold their configs), and publish everything to
+  [Releases](../../releases).
+
 ## Layout
 
 - `internal/config` — the client's single flat JSON settings file.
@@ -60,6 +114,8 @@ is checked in CI (`.github/workflows/ci.yml`).
 - `internal/webui` — the local settings HTTP UI.
 - `internal/trayapp`, `internal/autostart`, `internal/browser` — tray icon, autostart,
   opening the browser.
+- `packaging/` — installer configs used by `release.yml` (nfpm for `.deb`, WiX for `.msi`,
+  an `Info.plist` template for the macOS `.app`/`.dmg`).
 
 ## Status
 

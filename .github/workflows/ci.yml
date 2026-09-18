@@ -1,13 +1,14 @@
 # Action versions match gate4ai/server's own ci.yml, checked at source there
 # on 02.09.2026 — same ecosystem, same team, no reason for this repo to pin
-# different (possibly stale) versions of the same actions.
+# different (possibly stale) versions of the same actions. actions/upload-artifact
+# was checked directly at source (github.com/actions/upload-artifact/releases)
+# on 17.09.2026.
 
 name: ci
 
 on:
   push:
-    branches: [main]
-    tags: ["v*"]
+    branches-ignore: [main]
   pull_request:
 
 permissions:
@@ -60,7 +61,12 @@ jobs:
   # no CGO"). Building here for all three with CGO_ENABLED=0 is the actual
   # guarantee — the tray library was chosen because it needs none, not
   # because we assumed so from its README.
-  build:
+  #
+  # Runs for every branch push (main excluded — that goes through
+  # release.yml instead) and every PR, so a tester can open the finished
+  # run and grab a binary from its artifacts without waiting for a release.
+  build-artifacts:
+    needs: [lint, test]
     strategy:
       matrix:
         goos: [linux, windows, darwin]
@@ -70,8 +76,18 @@ jobs:
       - uses: actions/setup-go@v7.0.0
         with:
           go-version: ${{ env.GO_VERSION }}
-      - env:
+      - name: build
+        env:
           CGO_ENABLED: "0"
           GOOS: ${{ matrix.goos }}
           GOARCH: amd64
-        run: go build -o /dev/null ./...
+        run: |
+          out="gate4ai-sync-${{ matrix.goos }}-amd64"
+          if [ "${{ matrix.goos }}" = "windows" ]; then out="$out.exe"; fi
+          mkdir -p dist
+          go build -o "dist/$out" ./cmd/gate4ai-sync
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: gate4ai-sync-${{ matrix.goos }}-amd64
+          path: dist/
+          if-no-files-found: error

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=gate4.ai sync
+Comment=File sync client for the gate4.ai server
+Exec=/usr/bin/gate4ai-sync
+Icon=gate4ai-sync
+Terminal=false
+Categories=Utility;

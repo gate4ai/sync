@@ -1,0 +1,24 @@
+# nfpm package spec for the Ubuntu/Debian .deb — built in CI
+# (.github/workflows/release.yml) from the linux/amd64 binary.
+#
+# The app manages its own autostart entry (internal/autostart, an XDG
+# .desktop file under ~/.config/autostart) once the user enables it from
+# the settings page, so this package only needs to place a stable binary
+# on PATH — nothing else to wire up at install time.
+name: gate4ai-sync
+arch: amd64
+platform: linux
+version: ${VERSION}
+maintainer: gate4.ai <support@gate4.ai>
+description: File sync client for the gate4.ai server (tray app).
+homepage: https://github.com/gate4ai/server
+license: MIT
+contents:
+  - src: ./dist/gate4ai-sync-linux-amd64
+    dst: /usr/bin/gate4ai-sync
+    file_info:
+      mode: 0755
+  - src: ./packaging/nfpm/gate4ai-sync.desktop
+    dst: /usr/share/applications/gate4ai-sync.desktop
+  - src: ./internal/trayapp/icon.png
+    dst: /usr/share/icons/hicolor/32x32/apps/gate4ai-sync.png
