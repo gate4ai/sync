@@ -137,8 +137,14 @@ jobs:
       - name: build .ico from tray icon
         run: magick internal\trayapp\icon.png -define icon:auto-resize=256,64,48,32,16 packaging\windows\icon.ico
         shell: cmd
+      # Pinned to v6.0.2, the last WiX release before v7 started requiring
+      # acceptance of the Open Source Maintenance Fee EULA to use the
+      # binaries (github.com/wixtoolset/wix v7.0.0 release notes) — that's
+      # a licensing/payment decision for a human, not something CI should
+      # wave through on its own. Re-check at source before ever bumping past
+      # v6 here.
       - name: install WiX
-        run: dotnet tool install --global wix
+        run: dotnet tool install --global wix --version 6.0.2
       - name: build .msi
         run: |
           wix build packaging\windows\product.wxs -d Version=$env:VERSION -o "dist\gate4ai-sync-$env:VERSION-amd64.msi"
