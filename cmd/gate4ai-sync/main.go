@@ -14,6 +14,7 @@ import (
 	"syscall"
 
 	"github.com/gate4ai/sync/internal/autostart"
+	"github.com/gate4ai/sync/internal/browser"
 	"github.com/gate4ai/sync/internal/config"
 	"github.com/gate4ai/sync/internal/controlclient"
 	"github.com/gate4ai/sync/internal/logging"
@@ -73,6 +74,15 @@ func run(log *slog.Logger) error {
 	}
 	settingsURL := "http://" + ui.Addr() + "/"
 	log.Info("settings UI listening", "url", settingsURL)
+
+	// Sync isn't configured yet — open the settings page right away rather
+	// than waiting for a click on the tray icon, since a person who just
+	// installed the client has no reason yet to know it lives there.
+	if !cfg.Linked {
+		if err := browser.Open(settingsURL); err != nil {
+			log.Warn("open settings in browser", "err", err)
+		}
+	}
 
 	go loop.Run(ctx, cfg, &mu, saveConfig, &st, log)
 
