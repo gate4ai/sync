@@ -8,6 +8,15 @@ publishes a native installer for every platform below, built by
 
 ### macOS
 
+Homebrew — installs without the Gatekeeper prompt below, since `brew` fetches over curl
+and the download isn't quarantined the way a browser download is:
+
+```
+brew install gate4ai/gate4ai/gate4ai-sync
+```
+
+Or by hand:
+
 1. Download `gate4ai-sync-<version>-universal.dmg` (one build for Apple Silicon and Intel).
 2. Open it and drag **gate4.ai sync** into **Applications**.
 3. Launch it from Applications. The app is not notarized/signed with an Apple Developer ID,
@@ -15,6 +24,8 @@ publishes a native installer for every platform below, built by
    cannot be verified") — right-click the app, choose **Open**, then confirm in the dialog.
    This is only needed once.
 4. A tray icon appears; use its "Open settings" menu item to configure sync.
+
+Cask source: [gate4ai/homebrew-gate4ai](https://github.com/gate4ai/homebrew-gate4ai).
 
 ### Windows
 
