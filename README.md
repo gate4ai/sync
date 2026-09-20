@@ -26,6 +26,14 @@ publishes a native installer for every platform below, built by
 
 ### Ubuntu / Debian
 
+One-liner — downloads the latest amd64 `.deb`, installs it, and starts the app:
+
+```
+curl -fsSL https://raw.githubusercontent.com/gate4ai/sync/main/packaging/linux/install.sh | sh
+```
+
+Or by hand:
+
 1. Download `gate4ai-sync-<version>-amd64.deb`.
 2. Install it:
    ```
