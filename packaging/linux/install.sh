@@ -41,6 +41,5 @@ sudo apt install -y "$deb_path"
 
 echo "Starting gate4ai-sync..."
 setsid gate4ai-sync >/dev/null 2>&1 &
-disown
 
 echo "Done. Look for the gate4.ai sync tray icon to finish setup."
