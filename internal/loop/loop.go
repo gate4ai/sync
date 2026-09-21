@@ -108,6 +108,18 @@ func runOnce(ctx context.Context, cfg *config.Config, mu *sync.Mutex, saveConfig
 		dav := &webdavclient.Client{BaseURL: serverURL, Username: f.Username, Secret: f.Secret}
 		res, err := syncengine.SyncOnce(ctx, dav, f.Path, manifestPath, policy)
 		if err != nil {
+			if errors.Is(err, webdavclient.ErrUnauthorized) {
+				log.Warn("server no longer accepts this folder's mount credential; re-pairing", "path", f.Path, "err", err)
+				mu.Lock()
+				f.Slug, f.Username, f.Secret = "", "", ""
+				cfg.SetFolder(f)
+				cfg.Unlink()
+				saveErr := saveConfig()
+				mu.Unlock()
+				if saveErr != nil {
+					log.Error("save config after unlinking", "err", saveErr)
+				}
+			}
 			log.Error("sync folder", "path", f.Path, "err", err)
 			lastErr = err
 			continue

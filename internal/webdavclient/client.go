@@ -26,6 +26,15 @@ import (
 // have.
 var ErrNotFound = fmt.Errorf("not found")
 
+// ErrUnauthorized is returned by any request the server answers 401 to —
+// the mount credential (Username/Secret) it was given no longer works,
+// most often because the mount was deleted and re-created server-side.
+// Unlike controlclient.ErrUnauthorized (the ClientID pairing itself being
+// revoked), this is scoped to one folder's mount, but the caller (the sync
+// loop) recovers the same way: drop what's stale and send the user back
+// through /link to get fresh credentials for everything.
+var ErrUnauthorized = fmt.Errorf("unauthorized")
+
 // Client talks to one mount: BaseURL is the server address
 // (https://dav.gate4.ai), Username and Secret are the credential
 // controlclient.RegisterMount returned for this specific folder.
@@ -272,5 +281,9 @@ func hrefPath(href string) (string, error) {
 
 func statusError(resp *http.Response) error {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-	return fmt.Errorf("%s: %s", resp.Status, strings.TrimSpace(string(body)))
+	err := fmt.Errorf("%s: %s", resp.Status, strings.TrimSpace(string(body)))
+	if resp.StatusCode == http.StatusUnauthorized {
+		return fmt.Errorf("%w: %w", ErrUnauthorized, err)
+	}
+	return err
 }

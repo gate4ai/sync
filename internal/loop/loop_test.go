@@ -23,6 +23,9 @@ import (
 type fakeServer struct {
 	linked bool
 	files  map[string][]byte
+	// propfindUnauthorized makes every PROPFIND answer 401, simulating a
+	// mount whose credential the server no longer accepts.
+	propfindUnauthorized bool
 }
 
 func newFakeServer(t *testing.T) (*httptest.Server, *fakeServer) {
@@ -50,6 +53,9 @@ func (fs *fakeServer) serve(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == "/api/sync/v1/mounts" && r.Method == http.MethodPost:
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(controlclient.RegisteredMount{Slug: "documents", Username: "v-1", Secret: "sekret"})
+
+	case r.Method == "PROPFIND" && fs.propfindUnauthorized:
+		w.WriteHeader(http.StatusUnauthorized)
 
 	case r.Method == "PROPFIND":
 		w.Header().Set("Content-Type", "application/xml")
@@ -152,5 +158,31 @@ func TestRunOnceSkipsAnAlreadyRegisteredFolder(t *testing.T) {
 
 	if registerCalls != 0 {
 		t.Errorf("RegisterMount was called %d times for an already-registered folder, want 0", registerCalls)
+	}
+}
+
+func TestRunOnceUnlinksOnStaleMountCredential(t *testing.T) {
+	srv, fs := newFakeServer(t)
+	fs.linked = true
+	fs.propfindUnauthorized = true
+	dir := t.TempDir()
+	t.Setenv("GATE4AI_SYNC_DIR", t.TempDir())
+
+	cfg := &config.Config{
+		ClientID:  "c1",
+		ServerURL: srv.URL,
+		Linked:    true,
+		VaultSlug: "home-pc",
+		Folders:   []config.Folder{{ID: "folder-1", Path: dir, Slug: "documents", Username: "v-1", Secret: "sekret"}},
+	}
+	mu := &sync.Mutex{}
+
+	runOnce(t.Context(), cfg, mu, cfg.Save, &status.Status{}, slog.New(slog.DiscardHandler))
+
+	if cfg.Linked {
+		t.Error("Linked is still true after a 401 from the folder's mount")
+	}
+	if cfg.Folders[0].Registered() {
+		t.Errorf("folder is still registered after a 401 from its mount: %+v", cfg.Folders[0])
 	}
 }

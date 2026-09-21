@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -298,8 +299,11 @@ func (s *Server) removeFolder(w http.ResponseWriter, r *http.Request) {
 }
 
 // save is the button that starts pairing: it sends the browser — the very
-// one showing this settings page — to /link. There is nothing else to
-// persist here; folders are already saved as they are added.
+// one showing this settings page — to /link, with a return URL pointing
+// back at this loopback server so /link can send the browser home once
+// pairing finishes instead of leaving the user stranded on the cabinet.
+// There is nothing else to persist here; folders are already saved as they
+// are added.
 func (s *Server) save(w http.ResponseWriter, r *http.Request) {
 	s.Mu.Lock()
 	linked := s.Config.Linked
@@ -311,5 +315,7 @@ func (s *Server) save(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
-	http.Redirect(w, r, cabinet+"/link?client="+clientID, http.StatusSeeOther)
+	returnURL := "http://" + s.Addr() + "/"
+	dest := cabinet + "/link?client=" + url.QueryEscape(clientID) + "&return=" + url.QueryEscape(returnURL)
+	http.Redirect(w, r, dest, http.StatusSeeOther)
 }

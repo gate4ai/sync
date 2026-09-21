@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -263,7 +264,7 @@ func TestSaveRedirectsToLinkWithTheClientID(t *testing.T) {
 	}
 	_ = resp.Body.Close()
 
-	want := "https://cabinet.example/link?client=c1"
+	want := "https://cabinet.example/link?client=c1&return=" + url.QueryEscape("http://"+f.srv.Addr()+"/")
 	if got := resp.Header.Get("Location"); got != want {
 		t.Errorf("Location = %q, want %q", got, want)
 	}
