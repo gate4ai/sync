@@ -1,10 +1,12 @@
 # nfpm package spec for the Ubuntu/Debian .deb — built in CI
 # (.github/workflows/release.yml) from the linux/amd64 binary.
 #
-# The app manages its own autostart entry (internal/autostart, an XDG
-# .desktop file under ~/.config/autostart) once the user enables it from
-# the settings page, so this package only needs to place a stable binary
-# on PATH — nothing else to wire up at install time.
+# Installing this package does not launch the app or register autostart —
+# it only places the binary and a menu entry. The app registers its own
+# autostart entry (internal/autostart, an XDG .desktop file under
+# ~/.config/autostart) the first time it actually runs, best-effort, with
+# no settings toggle to turn it off. So the first run has to be by hand:
+# from the app menu or `gate4ai-sync` in a terminal.
 name: gate4ai-sync
 arch: amd64
 platform: linux
