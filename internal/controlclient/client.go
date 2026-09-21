@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,6 +16,12 @@ import (
 )
 
 const clientIDHeader = "X-Gate4AI-Client-ID"
+
+// ErrUnauthorized is returned by any call whose response was 401 — the
+// server no longer accepts this ClientID, most often because pairing was
+// revoked on the server side. Callers treat it the same as never having
+// linked: reset Config.Linked and send the user through /link again.
+var ErrUnauthorized = errors.New("unauthorized")
 
 // Client is scoped to one client_id (see internal/config — it is minted
 // once and never changes), which is all the control API needs to identify
@@ -58,6 +65,10 @@ func (c *Client) do(ctx context.Context, method, path string, body any, out any)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	if resp.StatusCode == http.StatusUnauthorized {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("%s %s: %s: %s: %w", method, path, resp.Status, strings.TrimSpace(string(msg)), ErrUnauthorized)
+	}
 	if resp.StatusCode >= 300 {
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return fmt.Errorf("%s %s: %s: %s", method, path, resp.Status, strings.TrimSpace(string(msg)))

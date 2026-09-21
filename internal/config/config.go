@@ -131,6 +131,15 @@ func (c *Config) Folder(id string) (Folder, bool) {
 	return Folder{}, false
 }
 
+// Unlink resets pairing state after the server stops accepting ClientID
+// (a 401 from the control API — see controlclient.ErrUnauthorized), most
+// often because pairing was revoked server-side. It leaves folders and
+// their credentials alone: those are re-registered once re-pairing links a
+// vault again, and RegisterMount is idempotent by folder ID either way.
+func (c *Config) Unlink() {
+	c.Linked, c.VaultSlug = false, ""
+}
+
 // SetFolder replaces the folder with the same ID, if there is one.
 func (c *Config) SetFolder(f Folder) {
 	for i := range c.Folders {

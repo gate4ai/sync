@@ -6,6 +6,7 @@ package loop
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"path/filepath"
 	"sync"
@@ -66,7 +67,18 @@ func runOnce(ctx context.Context, cfg *config.Config, mu *sync.Mutex, saveConfig
 
 	settings, err := control.Settings(ctx)
 	if err != nil {
-		log.Warn("read settings", "err", err)
+		if errors.Is(err, controlclient.ErrUnauthorized) {
+			log.Warn("server no longer accepts this client; re-pairing", "err", err)
+			mu.Lock()
+			cfg.Unlink()
+			saveErr := saveConfig()
+			mu.Unlock()
+			if saveErr != nil {
+				log.Error("save config after unlinking", "err", saveErr)
+			}
+		} else {
+			log.Warn("read settings", "err", err)
+		}
 		st.RecordError(err, time.Now())
 		return pendingInterval
 	}

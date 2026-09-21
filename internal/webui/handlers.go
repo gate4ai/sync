@@ -1,6 +1,7 @@
 package webui
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gate4ai/sync/internal/config"
+	"github.com/gate4ai/sync/internal/controlclient"
 )
 
 type folderRow struct {
@@ -115,6 +117,20 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) {
 			if settings.SettingsURL != "" {
 				page.SettingsURL = settings.SettingsURL
 			}
+		} else if errors.Is(err, controlclient.ErrUnauthorized) {
+			// The server no longer accepts this client (pairing revoked) —
+			// same reset the sync loop does on this error, so the next
+			// render falls into the "not connected" branch below and offers
+			// the same Connect button first-time pairing uses.
+			s.Log.Warn("server no longer accepts this client; re-pairing", "err", err)
+			s.Mu.Lock()
+			s.Config.Unlink()
+			saveErr := s.SaveConfig()
+			s.Mu.Unlock()
+			if saveErr != nil {
+				s.Log.Error("save config after unlinking", "err", saveErr)
+			}
+			page.Linked = false
 		} else {
 			s.Log.Warn("read settings for home page", "err", err)
 		}
