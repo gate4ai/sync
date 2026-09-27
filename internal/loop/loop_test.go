@@ -50,6 +50,18 @@ func (fs *fakeServer) serve(w http.ResponseWriter, r *http.Request) {
 			MaxFileSizeBytes: 1 << 20, PollIntervalSeconds: 3600, VaultSlug: "home-pc",
 		})
 
+	case r.URL.Path == "/api/sync/v1/plan":
+		// The rules are the server's; this fake accepts everything.
+		var req struct {
+			Files []controlclient.PlanFile `json:"files"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		accept := make([]bool, len(req.Files))
+		for i := range accept {
+			accept[i] = true
+		}
+		_ = json.NewEncoder(w).Encode(controlclient.PlanResult{Accept: accept})
+
 	case r.URL.Path == "/api/sync/v1/mounts" && r.Method == http.MethodPost:
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(controlclient.RegisteredMount{Slug: "documents", Username: "v-1", Secret: "sekret"})
@@ -79,7 +91,7 @@ func TestRunOnceDoesNothingUntilLinked(t *testing.T) {
 	cfg := &config.Config{ClientID: "c1", ServerURL: srv.URL}
 	mu := &sync.Mutex{}
 
-	interval := runOnce(t.Context(), cfg, mu, cfg.Save, &status.Status{}, slog.New(slog.DiscardHandler))
+	interval := runOnce(t.Context(), cfg, mu, cfg.Save, &status.Status{}, planCaches{}, slog.New(slog.DiscardHandler))
 	if interval != pendingInterval {
 		t.Errorf("interval = %v, want pendingInterval before linking", interval)
 	}
@@ -104,7 +116,7 @@ func TestRunOnceLinksRegistersAndSyncsOnce(t *testing.T) {
 	mu := &sync.Mutex{}
 	fs.linked = true
 
-	interval := runOnce(t.Context(), cfg, mu, cfg.Save, &status.Status{}, slog.New(slog.DiscardHandler))
+	interval := runOnce(t.Context(), cfg, mu, cfg.Save, &status.Status{}, planCaches{}, slog.New(slog.DiscardHandler))
 
 	if !cfg.Linked {
 		t.Fatal("Linked is still false after the server reported linked")
@@ -154,7 +166,7 @@ func TestRunOnceSkipsAnAlreadyRegisteredFolder(t *testing.T) {
 	}
 	mu := &sync.Mutex{}
 
-	runOnce(t.Context(), cfg, mu, cfg.Save, &status.Status{}, slog.New(slog.DiscardHandler))
+	runOnce(t.Context(), cfg, mu, cfg.Save, &status.Status{}, planCaches{}, slog.New(slog.DiscardHandler))
 
 	if registerCalls != 0 {
 		t.Errorf("RegisterMount was called %d times for an already-registered folder, want 0", registerCalls)
@@ -177,7 +189,7 @@ func TestRunOnceUnlinksOnStaleMountCredential(t *testing.T) {
 	}
 	mu := &sync.Mutex{}
 
-	runOnce(t.Context(), cfg, mu, cfg.Save, &status.Status{}, slog.New(slog.DiscardHandler))
+	runOnce(t.Context(), cfg, mu, cfg.Save, &status.Status{}, planCaches{}, slog.New(slog.DiscardHandler))
 
 	if cfg.Linked {
 		t.Error("Linked is still true after a 401 from the folder's mount")

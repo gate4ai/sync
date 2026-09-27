@@ -4,73 +4,38 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
-	"log/slog"
 	"os"
 	"path/filepath"
-	"regexp"
-	"strings"
 
 	"github.com/gate4ai/sync/internal/webdavclient"
 )
 
-// Policy is the subset of the server's settings (controlclient.Settings)
-// the engine needs to keep a file out of sync consideration entirely — see
-// applyPolicy for why "out of consideration" and not "delete it" is what a
-// disallowed file gets.
-type Policy struct {
-	// AllowedExtensions, nil meaning every extension is allowed. Compared
-	// case-insensitively, dot included ("*.md" -> ".md").
-	AllowedExtensions []string
-	// MaxFileSizeBytes, 0 meaning no limit.
-	MaxFileSizeBytes int64
-	// denyRe is vault.index_deny (internal/vault/classify.go on the server),
-	// compiled once by NewPolicy. On the server it means "not indexed"; here
-	// it means the same as AllowedExtensions and MaxFileSizeBytes — "not
-	// synced" — so a path an owner keeps out of search never leaves the
-	// machine it lives on either.
-	denyRe []*regexp.Regexp
+// File is one path in a synced folder with the size it has on one side.
+type File struct {
+	Path string
+	Size int64
 }
 
-// NewPolicy compiles indexDeny's RE2 patterns once so allows() does not
-// recompile them per file. A pattern that fails to compile is dropped with a
-// warning rather than aborting the sync — the same "matches nothing" fallback
-// the server uses for a row saved before it validated patterns on save (see
-// vault.Indexable), so one bad pattern degrades to "not deny-filtered"
-// instead of stopping sync entirely.
-func NewPolicy(allowedExtensions []string, maxFileSizeBytes int64, indexDeny []string, log *slog.Logger) Policy {
-	p := Policy{AllowedExtensions: allowedExtensions, MaxFileSizeBytes: maxFileSizeBytes}
-	for _, pattern := range indexDeny {
-		re, err := regexp.Compile(pattern)
-		if err != nil {
-			if log != nil {
-				log.Warn("index_deny pattern does not compile, ignoring it", "pattern", pattern, "err", err)
-			}
-			continue
-		}
-		p.denyRe = append(p.denyRe, re)
-	}
-	return p
+// Filter decides which files take part in sync. The rules belong to the
+// server (POST /api/sync/v1/plan, docs/sync-api.md in gate4ai/server) —
+// the client keeps no copy of them, so it cannot drift from what the server
+// and the cabinet's folder import apply. A file the filter refuses is left
+// out of consideration entirely: not uploaded, not downloaded, and never
+// deleted on either side because of it.
+type Filter interface {
+	// Accept answers positionally: the result's i-th entry is about files[i].
+	Accept(ctx context.Context, files []File) ([]bool, error)
 }
 
-func (p Policy) allows(clientPath string, size int64) bool {
-	if p.MaxFileSizeBytes > 0 && size > p.MaxFileSizeBytes {
-		return false
+// AcceptAll is the Filter that lets every file through, for tests.
+type AcceptAll struct{}
+
+func (AcceptAll) Accept(_ context.Context, files []File) ([]bool, error) {
+	out := make([]bool, len(files))
+	for i := range out {
+		out[i] = true
 	}
-	for _, re := range p.denyRe {
-		if re.MatchString(clientPath) {
-			return false
-		}
-	}
-	if p.AllowedExtensions == nil {
-		return true
-	}
-	ext := strings.ToLower(filepath.Ext(clientPath))
-	for _, a := range p.AllowedExtensions {
-		if strings.ToLower(a) == ext {
-			return true
-		}
-	}
-	return false
+	return out, nil
 }
 
 // Result is what one SyncOnce call did, for the caller to log.
@@ -83,7 +48,7 @@ type Result struct {
 // failure listing the remote side aborts here, before the manifest is
 // touched or anything is transferred, rather than being read as "the
 // server has nothing".
-func SyncOnce(ctx context.Context, dav *webdavclient.Client, localDir, manifestPath string, policy Policy) (Result, error) {
+func SyncOnce(ctx context.Context, dav *webdavclient.Client, localDir, manifestPath string, filter Filter) (Result, error) {
 	var res Result
 
 	manifest, err := Load(manifestPath)
@@ -104,14 +69,41 @@ func SyncOnce(ctx context.Context, dav *webdavclient.Client, localDir, manifestP
 		remote[p] = RemoteState{Size: e.Size, ModTime: e.ModTime, ETag: e.ETag}
 	}
 
+	// One question for both sides: a path can have a different size locally
+	// and remotely, so each (path, size) pair is asked about once.
+	var files []File
+	seen := map[File]bool{}
 	for p, l := range local {
-		if !policy.allows(p, l.Size) {
+		if f := (File{p, l.Size}); !seen[f] {
+			seen[f] = true
+			files = append(files, f)
+		}
+	}
+	for p, r := range remote {
+		if f := (File{p, r.Size}); !seen[f] {
+			seen[f] = true
+			files = append(files, f)
+		}
+	}
+	accept, err := filter.Accept(ctx, files)
+	if err != nil {
+		return res, fmt.Errorf("ask which files take part: %w", err)
+	}
+	if len(accept) != len(files) {
+		return res, fmt.Errorf("ask which files take part: %d answers for %d files", len(accept), len(files))
+	}
+	accepted := make(map[File]bool, len(files))
+	for i, f := range files {
+		accepted[f] = accept[i]
+	}
+	for p, l := range local {
+		if !accepted[File{p, l.Size}] {
 			delete(local, p)
 			res.Skipped++
 		}
 	}
 	for p, r := range remote {
-		if !policy.allows(p, r.Size) {
+		if !accepted[File{p, r.Size}] {
 			delete(remote, p)
 			res.Skipped++
 		}

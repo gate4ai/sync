@@ -84,11 +84,15 @@ func (c *Client) do(ctx context.Context, method, path string, body any, out any)
 
 // Settings is GET /api/sync/v1/settings.
 type Settings struct {
-	AllowedExtensions   []string `json:"allowed_extensions"`
-	MaxFileSizeBytes    int64    `json:"max_file_size_bytes"`
-	IndexDeny           []string `json:"index_deny"`
-	PollIntervalSeconds int      `json:"poll_interval_seconds"`
-	VaultSlug           string   `json:"vault_slug"`
+	// AllowedExtensions and MaxFileSizeBytes are shown to the owner; which
+	// files take part is Plan's answer, not something worked out from them.
+	AllowedExtensions []string `json:"allowed_extensions"`
+	MaxFileSizeBytes  int64    `json:"max_file_size_bytes"`
+	// PolicyVersion changes whenever Plan's answers could; a cache of those
+	// answers is dropped when it does.
+	PolicyVersion       string `json:"policy_version"`
+	PollIntervalSeconds int    `json:"poll_interval_seconds"`
+	VaultSlug           string `json:"vault_slug"`
 	// SettingsURL is the cabinet's "Sync client" tab for this vault, or
 	// empty if no folder has been registered yet (see docs/sync-api.md).
 	SettingsURL string `json:"settings_url"`
@@ -98,6 +102,32 @@ func (c *Client) Settings(ctx context.Context) (Settings, error) {
 	var s Settings
 	err := c.do(ctx, http.MethodGet, "/api/sync/v1/settings", nil, &s)
 	return s, err
+}
+
+// PlanFile is one entry of a POST /api/sync/v1/plan request: a path
+// relative to the synced folder and its size in bytes.
+type PlanFile struct {
+	Path string `json:"path"`
+	Size int64  `json:"size"`
+}
+
+// PlanResult is POST /api/sync/v1/plan's answer; Accept[i] is about the
+// request's files[i].
+type PlanResult struct {
+	Accept        []bool `json:"accept"`
+	PolicyVersion string `json:"policy_version"`
+}
+
+// Plan asks which of files take part in syncing the folder registered as
+// folderID. The server holds the rules; see docs/sync-api.md.
+func (c *Client) Plan(ctx context.Context, folderID string, files []PlanFile) (PlanResult, error) {
+	var r PlanResult
+	err := c.do(ctx, http.MethodPost, "/api/sync/v1/plan",
+		map[string]any{"folder_id": folderID, "files": files}, &r)
+	if err == nil && len(r.Accept) != len(files) {
+		err = fmt.Errorf("POST /api/sync/v1/plan: %d answers for %d files", len(r.Accept), len(files))
+	}
+	return r, err
 }
 
 // Mount is one entry of GET /api/sync/v1/mounts.

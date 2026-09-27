@@ -29,8 +29,9 @@ const pendingInterval = 15 * time.Second
 // that is known) say. st records the outcome of each iteration — see
 // internal/status — for the local web UI's "Status" line.
 func Run(ctx context.Context, cfg *config.Config, mu *sync.Mutex, saveConfig func() error, st *status.Status, log *slog.Logger) {
+	plans := planCaches{}
 	for {
-		interval := runOnce(ctx, cfg, mu, saveConfig, st, log)
+		interval := runOnce(ctx, cfg, mu, saveConfig, st, plans, log)
 		select {
 		case <-ctx.Done():
 			return
@@ -39,7 +40,7 @@ func Run(ctx context.Context, cfg *config.Config, mu *sync.Mutex, saveConfig fun
 	}
 }
 
-func runOnce(ctx context.Context, cfg *config.Config, mu *sync.Mutex, saveConfig func() error, st *status.Status, log *slog.Logger) time.Duration {
+func runOnce(ctx context.Context, cfg *config.Config, mu *sync.Mutex, saveConfig func() error, st *status.Status, plans planCaches, log *slog.Logger) time.Duration {
 	mu.Lock()
 	clientID, serverURL, linked := cfg.ClientID, cfg.EffectiveServerURL(), cfg.Linked
 	mu.Unlock()
@@ -82,7 +83,6 @@ func runOnce(ctx context.Context, cfg *config.Config, mu *sync.Mutex, saveConfig
 		st.RecordError(err, time.Now())
 		return pendingInterval
 	}
-	policy := syncengine.NewPolicy(settings.AllowedExtensions, settings.MaxFileSizeBytes, settings.IndexDeny, log)
 
 	mu.Lock()
 	folders := append([]config.Folder(nil), cfg.Folders...)
@@ -106,7 +106,8 @@ func runOnce(ctx context.Context, cfg *config.Config, mu *sync.Mutex, saveConfig
 			continue
 		}
 		dav := &webdavclient.Client{BaseURL: serverURL, Username: f.Username, Secret: f.Secret}
-		res, err := syncengine.SyncOnce(ctx, dav, f.Path, manifestPath, policy)
+		filter := &serverFilter{control: control, folderID: f.ID, version: settings.PolicyVersion, cache: plans.folder(f.ID)}
+		res, err := syncengine.SyncOnce(ctx, dav, f.Path, manifestPath, filter)
 		if err != nil {
 			if errors.Is(err, webdavclient.ErrUnauthorized) {
 				log.Warn("server no longer accepts this folder's mount credential; re-pairing", "path", f.Path, "err", err)

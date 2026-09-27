@@ -1,7 +1,9 @@
 package syncengine_test
 
 import (
+	"context"
 	"encoding/xml"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -140,7 +142,7 @@ func TestSyncOnceUploadsANewLocalFile(t *testing.T) {
 	}
 	manifest := filepath.Join(t.TempDir(), "manifest.json")
 
-	res, err := syncengine.SyncOnce(t.Context(), newClient(srv.URL), dir, manifest, syncengine.Policy{})
+	res, err := syncengine.SyncOnce(t.Context(), newClient(srv.URL), dir, manifest, syncengine.AcceptAll{})
 	if err != nil {
 		t.Fatalf("SyncOnce: %v", err)
 	}
@@ -158,7 +160,7 @@ func TestSyncOnceDownloadsANewRemoteFile(t *testing.T) {
 	dir := t.TempDir()
 	manifest := filepath.Join(t.TempDir(), "manifest.json")
 
-	res, err := syncengine.SyncOnce(t.Context(), newClient(srv.URL), dir, manifest, syncengine.Policy{})
+	res, err := syncengine.SyncOnce(t.Context(), newClient(srv.URL), dir, manifest, syncengine.AcceptAll{})
 	if err != nil {
 		t.Fatalf("SyncOnce: %v", err)
 	}
@@ -183,10 +185,10 @@ func TestSyncOnceIsAQuietNoOpOnASecondRunWithNoChanges(t *testing.T) {
 	manifest := filepath.Join(t.TempDir(), "manifest.json")
 	client := newClient(srv.URL)
 
-	if _, err := syncengine.SyncOnce(t.Context(), client, dir, manifest, syncengine.Policy{}); err != nil {
+	if _, err := syncengine.SyncOnce(t.Context(), client, dir, manifest, syncengine.AcceptAll{}); err != nil {
 		t.Fatalf("first SyncOnce: %v", err)
 	}
-	res, err := syncengine.SyncOnce(t.Context(), client, dir, manifest, syncengine.Policy{})
+	res, err := syncengine.SyncOnce(t.Context(), client, dir, manifest, syncengine.AcceptAll{})
 	if err != nil {
 		t.Fatalf("second SyncOnce: %v", err)
 	}
@@ -195,29 +197,19 @@ func TestSyncOnceIsAQuietNoOpOnASecondRunWithNoChanges(t *testing.T) {
 	}
 }
 
-func TestSyncOnceSkipsAFileOverTheSizeLimitWithoutTouchingEitherSide(t *testing.T) {
-	srv, fs := newFakeServer(t)
-	dir := t.TempDir()
-	big := make([]byte, 100)
-	if err := os.WriteFile(filepath.Join(dir, "big.bin"), big, 0o600); err != nil {
-		t.Fatalf("write local file: %v", err)
-	}
-	manifest := filepath.Join(t.TempDir(), "manifest.json")
+// refuse is a Filter that refuses the listed paths, whatever their size —
+// the rules themselves are the server's and are tested there.
+type refuse map[string]bool
 
-	res, err := syncengine.SyncOnce(t.Context(), newClient(srv.URL), dir, manifest,
-		syncengine.Policy{MaxFileSizeBytes: 10})
-	if err != nil {
-		t.Fatalf("SyncOnce: %v", err)
+func (r refuse) Accept(_ context.Context, files []syncengine.File) ([]bool, error) {
+	out := make([]bool, len(files))
+	for i, f := range files {
+		out[i] = !r[f.Path]
 	}
-	if res.Uploaded != 0 || res.Skipped != 1 {
-		t.Errorf("res = %+v, want the oversized file skipped and not uploaded", res)
-	}
-	if _, ok := fs.files["big.bin"]; ok {
-		t.Error("the oversized file was uploaded despite the policy")
-	}
+	return out, nil
 }
 
-func TestSyncOnceSkipsAFileMatchingIndexDenyWithoutTouchingEitherSide(t *testing.T) {
+func TestSyncOnceLeavesARefusedFileAloneOnBothSides(t *testing.T) {
 	srv, fs := newFakeServer(t)
 	dir := t.TempDir()
 	if err := os.Mkdir(filepath.Join(dir, ".obsidian"), 0o700); err != nil {
@@ -226,18 +218,48 @@ func TestSyncOnceSkipsAFileMatchingIndexDenyWithoutTouchingEitherSide(t *testing
 	if err := os.WriteFile(filepath.Join(dir, ".obsidian", "app.json"), []byte("{}"), 0o600); err != nil {
 		t.Fatalf("write local file: %v", err)
 	}
+	fs.files["meeting.mp4"] = []byte("video")
 	manifest := filepath.Join(t.TempDir(), "manifest.json")
 
-	policy := syncengine.NewPolicy(nil, 0, []string{`(?:.*/)?\.[^/]+/.*`}, nil)
-	res, err := syncengine.SyncOnce(t.Context(), newClient(srv.URL), dir, manifest, policy)
+	res, err := syncengine.SyncOnce(t.Context(), newClient(srv.URL), dir, manifest,
+		refuse{".obsidian/app.json": true, "meeting.mp4": true})
 	if err != nil {
 		t.Fatalf("SyncOnce: %v", err)
 	}
-	if res.Uploaded != 0 || res.Skipped != 1 {
-		t.Errorf("res = %+v, want the denied file skipped and not uploaded", res)
+	if res != (syncengine.Result{Skipped: 2}) {
+		t.Errorf("res = %+v, want both files skipped and nothing else done", res)
 	}
 	if _, ok := fs.files[".obsidian/app.json"]; ok {
-		t.Error("the denied file was uploaded despite index_deny")
+		t.Error("the refused local file was uploaded")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "meeting.mp4")); !os.IsNotExist(err) {
+		t.Error("the refused remote file was downloaded")
+	}
+	if _, ok := fs.files["meeting.mp4"]; !ok {
+		t.Error("the refused remote file was deleted")
+	}
+}
+
+// failingFilter stands in for a server that could not be asked.
+type failingFilter struct{}
+
+func (failingFilter) Accept(context.Context, []syncengine.File) ([]bool, error) {
+	return nil, errors.New("server unreachable")
+}
+
+func TestSyncOnceTransfersNothingWhenTheFilterCannotAnswer(t *testing.T) {
+	srv, fs := newFakeServer(t)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.md"), []byte("hello"), 0o600); err != nil {
+		t.Fatalf("write local file: %v", err)
+	}
+	manifest := filepath.Join(t.TempDir(), "manifest.json")
+
+	if _, err := syncengine.SyncOnce(t.Context(), newClient(srv.URL), dir, manifest, failingFilter{}); err == nil {
+		t.Fatal("SyncOnce succeeded without knowing which files take part")
+	}
+	if len(fs.files) != 0 {
+		t.Errorf("remote files = %v, want nothing uploaded", fs.files)
 	}
 }
 
@@ -250,12 +272,12 @@ func TestSyncOnceDeletesLocallyAfterARemoteDeletion(t *testing.T) {
 	manifest := filepath.Join(t.TempDir(), "manifest.json")
 	client := newClient(srv.URL)
 
-	if _, err := syncengine.SyncOnce(t.Context(), client, dir, manifest, syncengine.Policy{}); err != nil {
+	if _, err := syncengine.SyncOnce(t.Context(), client, dir, manifest, syncengine.AcceptAll{}); err != nil {
 		t.Fatalf("first SyncOnce: %v", err)
 	}
 	delete(fs.files, "a.md")
 
-	res, err := syncengine.SyncOnce(t.Context(), client, dir, manifest, syncengine.Policy{})
+	res, err := syncengine.SyncOnce(t.Context(), client, dir, manifest, syncengine.AcceptAll{})
 	if err != nil {
 		t.Fatalf("second SyncOnce: %v", err)
 	}
