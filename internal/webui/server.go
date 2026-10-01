@@ -50,6 +50,7 @@ func (s *Server) Start() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", s.home)
 	mux.HandleFunc("GET /browse", s.browse)
+	mux.HandleFunc("GET /logo.svg", serveLogo)
 	mux.HandleFunc("POST /folders", s.addFolder)
 	mux.HandleFunc("POST /folders/remove", s.removeFolder)
 	mux.HandleFunc("POST /save", s.save)
@@ -74,6 +75,12 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		return nil
 	}
 	return s.http.Shutdown(ctx)
+}
+
+func serveLogo(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "image/svg+xml")
+	w.Header().Set("Cache-Control", "max-age=86400")
+	_, _ = w.Write(logoSVG)
 }
 
 func (s *Server) render(w http.ResponseWriter, name string, data any) {

@@ -186,6 +186,7 @@ type browsePage struct {
 	// you added five levels up would otherwise vanish from view the moment
 	// you're browsing anywhere else.
 	Folders []folderRow
+	HomeURL string
 }
 
 func (s *Server) browse(w http.ResponseWriter, r *http.Request) {
@@ -211,7 +212,7 @@ func (s *Server) browse(w http.ResponseWriter, r *http.Request) {
 
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		s.render(w, "browse", browsePage{Path: dir, Parent: filepath.Dir(dir), Folders: folderList})
+		s.render(w, "browse", browsePage{Path: dir, Parent: filepath.Dir(dir), Folders: folderList, HomeURL: cfg.EffectiveCabinetURL()})
 		return
 	}
 	var rows []browseEntry
@@ -228,7 +229,7 @@ func (s *Server) browse(w http.ResponseWriter, r *http.Request) {
 	if parent == dir {
 		parent = ""
 	}
-	s.render(w, "browse", browsePage{Path: dir, Parent: parent, Entries: rows, Folders: folderList})
+	s.render(w, "browse", browsePage{Path: dir, Parent: parent, Entries: rows, Folders: folderList, HomeURL: cfg.EffectiveCabinetURL()})
 }
 
 func (s *Server) addFolder(w http.ResponseWriter, r *http.Request) {
