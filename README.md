@@ -2,58 +2,45 @@
 
 ## Installation
 
-Grab the latest release from this repo's [Releases page](../../releases). Each release
-publishes a native installer for every platform below, built by
-[release.yml](.github/workflows/release.yml).
+gate4.ai serves the installers of the latest release itself, at
+[gate4.ai/help/install-sync](https://gate4.ai/help/install-sync). It mirrors every release
+published here by [release.yml](.github/workflows/release.yml); the same files are on this
+repo's [Releases page](../../releases) under versioned names.
 
-### macOS
+### macOS and Ubuntu / Debian
 
-Homebrew — installs without the Gatekeeper prompt below, since `brew` fetches over curl
-and the download isn't quarantined the way a browser download is:
+One command for both — installs the latest release and starts the app:
 
 ```
-brew install gate4ai/gate4ai/gate4ai-sync
+curl -fsSL https://gate4.ai/install.sh | sh
 ```
 
-Or by hand:
+On macOS it uses the [gate4ai/homebrew-gate4ai](https://github.com/gate4ai/homebrew-gate4ai)
+tap when Homebrew is installed, otherwise the universal `.dmg` (one build for Apple Silicon
+and Intel). The app is not notarized/signed with an Apple Developer ID, but neither path
+trips Gatekeeper: nothing is downloaded by a browser, so nothing is quarantined. On Linux it
+installs the amd64 `.deb` with apt. The script's source is `web/public/install.sh` in
+[gate4ai/server](https://github.com/gate4ai/server).
 
-1. Download `gate4ai-sync-<version>-universal.dmg` (one build for Apple Silicon and Intel).
-2. Open it and drag **gate4.ai sync** into **Applications**.
-3. Launch it from Applications. The app is not notarized/signed with an Apple Developer ID,
-   so Gatekeeper will refuse the first launch ("cannot be opened because the developer
-   cannot be verified") — right-click the app, choose **Open**, then confirm in the dialog.
-   This is only needed once.
-4. A tray icon appears; use its "Open settings" menu item to configure sync.
+By hand on Ubuntu / Debian:
 
-Cask source: [gate4ai/homebrew-gate4ai](https://github.com/gate4ai/homebrew-gate4ai).
+```
+curl -fLO https://gate4.ai/download/gate4ai-sync-amd64.deb
+sudo apt install ./gate4ai-sync-amd64.deb
+```
+
+then launch **gate4.ai sync** from your application menu, or run `gate4ai-sync` from a
+terminal.
 
 ### Windows
 
-1. Download `gate4ai-sync-<version>-amd64.msi`.
+1. Download [gate4.ai/download/windows](https://gate4.ai/download/windows) (the `.msi`).
 2. Run it. The installer is not code-signed, so SmartScreen may show "Windows protected your
    PC" — click **More info** → **Run anyway**.
 3. It installs to `Program Files\gate4ai-sync` and adds a Start Menu shortcut.
 4. Launch **gate4.ai sync** from the Start Menu; a tray icon appears.
 
-### Ubuntu / Debian
-
-One-liner — downloads the latest amd64 `.deb`, installs it, and starts the app:
-
-```
-curl -fsSL https://raw.githubusercontent.com/gate4ai/sync/main/packaging/linux/install.sh | sh
-```
-
-Or by hand:
-
-1. Download `gate4ai-sync-<version>-amd64.deb`.
-2. Install it:
-   ```
-   sudo apt install ./gate4ai-sync-<version>-amd64.deb
-   ```
-3. Launch **gate4.ai sync** from your application menu, or run `gate4ai-sync` from a
-   terminal.
-
-All three installers only place the binary — autostart on login is opt-in from the app's
+The installers only place the binary — autostart on login is opt-in from the app's
 own settings page (`internal/autostart`), not something the installer sets up for you.
 
 Prefer a plain binary (other Linux distros, or you just want the file)? Every release also

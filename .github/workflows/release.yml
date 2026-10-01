@@ -215,3 +215,32 @@ jobs:
           name: ${{ needs.version.outputs.tag }}
           generate_release_notes: true
           files: dist/*
+
+  # gate4.ai serves the installers itself (https://gate4.ai/download/, and
+  # install.sh downloads from there), so the machine has to learn about every
+  # release. It mirrors the release on its own (deploy/sync-release-fetch.py in
+  # gate4ai/server, checking each file against GitHub's sha256); this job only
+  # tells it which tag, with a request signed by SYNC_RELEASE_SECRET. The
+  # runner holds no credentials to the machine and uploads nothing.
+  mirror:
+    needs: [version, release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Announce the release to gate4.ai
+        env:
+          SYNC_RELEASE_SECRET: ${{ secrets.SYNC_RELEASE_SECRET }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          body="{\"tag\":\"${TAG}\",\"ts\":$(date +%s)}"
+          sig="$(printf '%s' "$body" | openssl dgst -sha256 -hmac "$SYNC_RELEASE_SECRET" | sed 's/^.* //')"
+          status="$(curl -sS -o /tmp/mirror-response.txt -w '%{http_code}' \
+            -X POST "https://auth.gate4.ai/ci-sync-release" \
+            -H "Content-Type: application/json" \
+            -H "X-Signature: sha256=${sig}" \
+            --data "$body")"
+          cat /tmp/mirror-response.txt
+          if [ "$status" != "200" ]; then
+            echo "mirror webhook returned HTTP ${status}"
+            exit 1
+          fi
