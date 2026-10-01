@@ -15,6 +15,7 @@ var logoSVG []byte
 var templates = map[string]string{
 	"home":   homeHTML + layoutHTML + foldersListHTML,
 	"browse": browseHTML + layoutHTML + foldersListHTML,
+	"error":  errorHTML + layoutHTML + foldersListHTML,
 }
 
 // layoutHTML is the page chrome shared by every page: the stylesheet and
@@ -115,6 +116,8 @@ button.lg, .btn.lg { height: 2.25rem; padding: 0 1rem; }
 .btn.outline, button.outline { background: var(--background); color: var(--foreground); border-color: var(--border); }
 .btn.outline:hover, button.outline:hover { background: var(--muted); }
 button.ghost { background: transparent; color: var(--muted-foreground); }
+button:disabled { opacity: .5; cursor: not-allowed; }
+button.ghost:disabled:hover { background: transparent; color: var(--muted-foreground); }
 button.ghost:hover { background: color-mix(in oklch, var(--destructive) 10%, transparent); color: var(--destructive); }
 .actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: 1rem; }
 
@@ -156,7 +159,7 @@ const foldersListHTML = `
       {{if .SettingsURL}}<a class="icon-btn" href="{{.SettingsURL}}" target="_blank" title="Settings for {{.Slug}} on gate4.ai" aria-label="Settings for {{.Slug}}">{{template "gear"}}</a>{{end}}
       <form class="inline" method="post" action="/folders/remove">
         <input type="hidden" name="id" value="{{.ID}}">
-        <button class="ghost" type="submit">Remove</button>
+        <button class="ghost" type="submit"{{if not .CanRemove}} disabled title="Connect to gate4.ai to remove this folder"{{end}}>Remove</button>
       </form>
     </div>
   </div>
@@ -245,6 +248,23 @@ const browseHTML = `<!doctype html>
 </section>
 
 <p class="actions"><a class="btn outline" href="/">Cancel</a></p>
+</main>
+</body>
+</html>
+`
+
+const errorHTML = `<!doctype html>
+<html lang="en">
+<head>
+{{template "head"}}
+<title>{{.Title}} — gate4.ai Sync Client</title>
+</head>
+<body>
+{{template "header" .}}
+<main>
+<h1 class="alert">{{template "alert-icon"}}{{.Title}}</h1>
+<p class="lead">{{.Message}}</p>
+<p class="actions"><a class="btn outline" href="/">Back</a></p>
 </main>
 </body>
 </html>

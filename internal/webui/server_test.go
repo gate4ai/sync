@@ -23,7 +23,8 @@ import (
 // fakeControlServer answers the handful of control-API calls the webui
 // package makes (Settings, DisableMount).
 type fakeControlServer struct {
-	disabled []string
+	disabled   []string
+	disableErr error
 }
 
 func newFakeControlServer(t *testing.T) (*httptest.Server, *fakeControlServer) {
@@ -36,6 +37,10 @@ func newFakeControlServer(t *testing.T) (*httptest.Server, *fakeControlServer) {
 				MaxFileSizeBytes: 50 * 1024 * 1024, PollIntervalSeconds: 60, VaultSlug: "home-pc",
 			})
 		case strings.HasPrefix(r.URL.Path, "/api/sync/v1/mounts/") && r.Method == http.MethodDelete:
+			if fc.disableErr != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
 			fc.disabled = append(fc.disabled, strings.TrimPrefix(r.URL.Path, "/api/sync/v1/mounts/"))
 			w.WriteHeader(http.StatusNoContent)
 		default:
@@ -440,5 +445,44 @@ func TestHomeLinksARegisteredFolderToItsFilesAndSettings(t *testing.T) {
 	}
 	if strings.Contains(page, "Change on gate4.ai") {
 		t.Error("the page-wide settings link is still there")
+	}
+}
+
+func TestRemoveFailureShowsAnErrorPageAndKeepsTheFolder(t *testing.T) {
+	f := newFixture(t)
+	f.cfg.Folders = []config.Folder{{ID: "folder-1", Path: "/tmp/x", Username: "u", Secret: "s", Slug: "x"}}
+	f.control.disableErr = errors.New("boom")
+
+	resp, err := http.PostForm(f.url("/folders/remove"), map[string][]string{"id": {"folder-1"}})
+	if err != nil {
+		t.Fatalf("POST /folders/remove: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Errorf("status = %d, want 502", resp.StatusCode)
+	}
+	if !strings.Contains(string(body), "Could not remove the folder") || !strings.Contains(string(body), "<html") {
+		t.Errorf("body is not the error page: %q", body)
+	}
+	if len(f.cfg.Folders) != 1 {
+		t.Error("folder was removed despite the failure")
+	}
+}
+
+func TestRemoveButtonIsDisabledForARegisteredFolderWhileNotLinked(t *testing.T) {
+	f := newFixture(t)
+	f.cfg.Linked = false
+	f.cfg.Folders = []config.Folder{{ID: "folder-1", Path: "/tmp/x", Username: "u", Secret: "s", Slug: "x"}}
+
+	resp, err := http.Get(f.url("/"))
+	if err != nil {
+		t.Fatalf("GET /: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), `type="submit" disabled`) {
+		t.Errorf("Remove button is not disabled: %s", body)
 	}
 }

@@ -24,6 +24,10 @@ type folderRow struct {
 	// Settings live per mount on the server, so the link sits on the folder
 	// rather than on the page-wide "Server settings" block.
 	Slug, FilesURL, SettingsURL string
+	// CanRemove is false for a registered folder while the client is not
+	// linked: removing it has to disable its mount on the server first,
+	// which needs a working connection.
+	CanRemove bool
 }
 
 type homePage struct {
@@ -82,12 +86,13 @@ func relativeTime(now, t time.Time) string {
 func folderRows(cfg config.Config, folders []config.Folder) []folderRow {
 	var rows []folderRow
 	for _, f := range folders {
-		row := folderRow{ID: f.ID, Path: f.Path, Status: "waiting to connect"}
+		row := folderRow{ID: f.ID, Path: f.Path, Status: "waiting to connect", CanRemove: true}
 		switch {
 		case f.Registered():
 			slug := url.PathEscape(f.Slug)
 			row.Status = "synced as " + f.Slug
 			row.Slug = f.Slug
+			row.CanRemove = cfg.Linked
 			row.FilesURL = cfg.EffectiveCabinetURL() + "/files/" + slug
 			row.SettingsURL = cfg.EffectiveCabinetURL() + "/settings/" + slug
 		case cfg.Linked:
@@ -295,7 +300,8 @@ func (s *Server) removeFolder(w http.ResponseWriter, r *http.Request) {
 	if folder.Registered() {
 		if err := s.Control().DisableMount(r.Context(), id); err != nil {
 			s.Log.Error("disable mount", "folder_id", id, "err", err)
-			http.Error(w, "could not disconnect this folder from the server; try again", http.StatusBadGateway)
+			s.renderError(w, http.StatusBadGateway, "Could not remove the folder",
+				"gate4.ai did not confirm disconnecting this folder, so it is still configured. Check your connection and try again.")
 			return
 		}
 	}
@@ -344,4 +350,19 @@ func (s *Server) linkURL() string {
 // to persist here; folders are already saved as they are added.
 func (s *Server) save(w http.ResponseWriter, r *http.Request) {
 	s.redirectHomeOrLink(w, r)
+}
+
+type errorPage struct {
+	Title, Message string
+	HomeURL        string
+}
+
+// renderError shows a failure as a regular page of the client instead of a
+// bare plain-text body, with a way back to the home page.
+func (s *Server) renderError(w http.ResponseWriter, status int, title, message string) {
+	s.Mu.Lock()
+	home := s.Config.EffectiveCabinetURL()
+	s.Mu.Unlock()
+	w.WriteHeader(status)
+	s.render(w, "error", errorPage{Title: title, Message: message, HomeURL: home})
 }
