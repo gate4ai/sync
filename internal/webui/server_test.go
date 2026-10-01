@@ -97,7 +97,29 @@ func TestHomeShowsUnlinkedState(t *testing.T) {
 	if !strings.Contains(string(body), "Not connected yet") {
 		t.Errorf("home page did not mention being unconnected:\n%s", body)
 	}
-	if !strings.Contains(string(body), "Connect to gate4.ai") {
+	if strings.Contains(string(body), "Connect to gate4.ai") {
+		t.Error("first-run home page offers a connect button; adding a folder starts pairing")
+	}
+}
+
+func TestHomeOffersReconnectWhenUnlinkedWithFolders(t *testing.T) {
+	f := newFixture(t)
+	f.cfg.Folders = []config.Folder{{ID: "folder-1", Path: "/tmp/x", Slug: "x"}}
+
+	resp, err := http.Get(f.url("/"))
+	if err != nil {
+		t.Fatalf("GET /: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	b, _ := io.ReadAll(resp.Body)
+	body := string(b)
+	if !strings.Contains(body, "Not connected") || strings.Contains(body, "Not connected yet") {
+		t.Errorf("want the plain \"Not connected\" error heading:\n%s", body)
+	}
+	if strings.Contains(body, "Add a folder to sync") {
+		t.Error("first-run hint shown to someone who connected before")
+	}
+	if !strings.Contains(body, "Connect to gate4.ai") {
 		t.Error("home page is missing the connect button")
 	}
 }

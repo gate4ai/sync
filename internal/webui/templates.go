@@ -100,6 +100,9 @@ h2 { font-size: 1rem; font-weight: 500; margin: 0; }
 .badge { display: inline-flex; align-items: center; gap: .35rem; border-radius: 999px; padding: .1rem .6rem; font-size: .8rem; font-weight: 500; background: var(--muted); color: var(--muted-foreground); }
 .badge.ok { background: var(--success-subtle); color: var(--success-subtle-foreground); }
 .badge.ok::before { content: ""; width: .45rem; height: .45rem; border-radius: 50%; background: var(--success); }
+.alert-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
+h1.alert { display: flex; align-items: center; gap: .6rem; margin: 0; font-size: 1.875rem; color: var(--destructive); }
+h1.alert svg { flex: none; }
 .status-line.error { color: var(--destructive); font-weight: 500; }
 
 .setting-row { display: flex; gap: 1rem; padding: .2rem 0; color: var(--muted-foreground); }
@@ -138,6 +141,8 @@ button.ghost:hover { background: color-mix(in oklch, var(--destructive) 10%, tra
 const foldersListHTML = `
 {{define "gear"}}<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>{{end}}
 
+{{define "alert-icon"}}<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>{{end}}
+
 {{define "folders-list"}}
 <section class="card">
   <div class="card-head"><h2>Folders</h2></div>
@@ -175,6 +180,13 @@ const homeHTML = `<!doctype html>
 {{if .Linked}}
 <h1>Connected to {{.VaultSlug}}</h1>
 <p class="lead status-line{{if .StatusIsError}} error{{end}}">Status: {{.Status}}</p>
+{{else if .Reconnect}}
+<div class="alert-head">
+  <h1 class="alert">{{template "alert-icon"}}Not connected</h1>
+  <form method="post" action="/save">
+    <button class="lg" type="submit">Connect to gate4.ai</button>
+  </form>
+</div>
 {{else}}
 <h1>Not connected yet</h1>
 <p class="lead">Add a folder to sync — gate4.ai will then ask you to connect this computer to your account.</p>
@@ -193,11 +205,6 @@ const homeHTML = `<!doctype html>
 </section>
 {{end}}
 
-{{if not .Linked}}
-<form class="actions" method="post" action="/save">
-  <button class="lg" type="submit">Connect to gate4.ai</button>
-</form>
-{{end}}
 </main>
 </body>
 </html>

@@ -31,11 +31,15 @@ type homePage struct {
 	VaultSlug     string
 	Status        string // "Synced 2 minutes ago" / "Error: ..." / "" before linking
 	StatusIsError bool
-	Folders       []folderRow
-	Settings      []settingRow
-	CabinetURL    string
-	ClientID      string
-	HomeURL       string
+	// Reconnect is set when the client isn't linked but already has folders
+	// configured: the person connected before and only needs to pair again.
+	// Without folders it is a first run, and adding a folder starts pairing.
+	Reconnect  bool
+	Folders    []folderRow
+	Settings   []settingRow
+	CabinetURL string
+	ClientID   string
+	HomeURL    string
 }
 
 // settingRow is one line of the "Server settings" block — see its own
@@ -139,6 +143,8 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) {
 			s.Log.Warn("read settings for home page", "err", err)
 		}
 	}
+
+	page.Reconnect = !page.Linked && len(folders) > 0
 
 	s.render(w, "home", page)
 }
