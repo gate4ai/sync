@@ -106,8 +106,6 @@ h1.alert { display: flex; align-items: center; gap: .6rem; margin: 0; font-size:
 h1.alert svg { flex: none; }
 .status-line.error { color: var(--destructive); font-weight: 500; }
 
-.setting-row { display: flex; gap: 1rem; padding: .2rem 0; color: var(--muted-foreground); }
-.setting-name { min-width: 9rem; font-weight: 500; color: var(--foreground); }
 
 form.inline { display: inline; }
 button, .btn { font: inherit; font-size: .875rem; font-weight: 500; display: inline-flex; align-items: center; justify-content: center; height: 2rem; padding: 0 .75rem; border-radius: var(--radius); border: 1px solid transparent; cursor: pointer; white-space: nowrap; text-decoration: none; background: var(--primary); color: var(--primary-foreground); }
@@ -197,16 +195,7 @@ const homeHTML = `<!doctype html>
 
 {{template "folders-list" .}}
 
-<p class="actions"><a class="btn outline" href="/browse">+ Add a folder</a></p>
-
-{{if .Settings}}
-<section class="card settings">
-  <div class="card-head"><h2>Server settings</h2></div>
-  {{range .Settings}}
-  <div class="setting-row"><span class="setting-name">{{.Name}}</span> {{.Value}}</div>
-  {{end}}
-</section>
-{{end}}
+<p class="actions"><a class="btn" href="/browse">+ Add a folder</a></p>
 
 </main>
 </body>

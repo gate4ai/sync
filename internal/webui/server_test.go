@@ -165,23 +165,6 @@ func TestHomeShowsErrorStatusOverASuccessfulOne(t *testing.T) {
 	}
 }
 
-func TestHomeShowsServerSettingsAsSeparateLabeledLines(t *testing.T) {
-	f := newFixture(t)
-	f.cfg.Linked = true
-
-	resp, err := http.Get(f.url("/"))
-	if err != nil {
-		t.Fatalf("GET /: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	body, _ := io.ReadAll(resp.Body)
-	for _, name := range []string{"Allowed types", "Max file size", "Poll interval"} {
-		if !strings.Contains(string(body), `class="setting-name">`+name) {
-			t.Errorf("home page is missing a labeled row for %q:\n%s", name, body)
-		}
-	}
-}
-
 func TestAddFolderThenHomeListsIt(t *testing.T) {
 	f := newFixture(t)
 	dir := t.TempDir()

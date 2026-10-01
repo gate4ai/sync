@@ -1,7 +1,6 @@
 package webui
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -12,7 +11,6 @@ import (
 	"time"
 
 	"github.com/gate4ai/sync/internal/config"
-	"github.com/gate4ai/sync/internal/controlclient"
 )
 
 type folderRow struct {
@@ -21,8 +19,7 @@ type folderRow struct {
 	// registered: the slug in its status line links to the mount's files in
 	// the cabinet, and a gear next to Remove opens that mount's settings —
 	// the same pair of links the cabinet's own vault list gives each mount.
-	// Settings live per mount on the server, so the link sits on the folder
-	// rather than on the page-wide "Server settings" block.
+	// Settings live per mount on the server, so the link sits on the folder.
 	Slug, FilesURL, SettingsURL string
 	// CanRemove is false for a registered folder while the client is not
 	// linked: removing it has to disable its mount on the server first,
@@ -40,16 +37,9 @@ type homePage struct {
 	// Without folders it is a first run, and adding a folder starts pairing.
 	Reconnect  bool
 	Folders    []folderRow
-	Settings   []settingRow
 	CabinetURL string
 	ClientID   string
 	HomeURL    string
-}
-
-// settingRow is one line of the "Server settings" block — see its own
-// comment on why this is a list of rows rather than one packed sentence.
-type settingRow struct {
-	Name, Value string
 }
 
 // statusLine turns the loop's last-known outcome into the one sentence the
@@ -123,56 +113,9 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) {
 		page.StatusIsError = snap.Error != ""
 	}
 
-	if cfg.Linked {
-		if settings, err := s.Control().Settings(r.Context()); err == nil {
-			page.Settings = []settingRow{
-				{Name: "Allowed types", Value: joinOrAll(settings.AllowedExtensions)},
-				{Name: "Max file size", Value: humanSize(settings.MaxFileSizeBytes)},
-				{Name: "Poll interval", Value: humanInterval(settings.PollIntervalSeconds)},
-			}
-		} else if errors.Is(err, controlclient.ErrUnauthorized) {
-			// The server no longer accepts this client (pairing revoked) —
-			// same reset the sync loop does on this error, so the next
-			// render falls into the "not connected" branch below and offers
-			// the same Connect button first-time pairing uses.
-			s.Log.Warn("server no longer accepts this client; re-pairing", "err", err)
-			s.Mu.Lock()
-			s.Config.Unlink()
-			saveErr := s.SaveConfig()
-			s.Mu.Unlock()
-			if saveErr != nil {
-				s.Log.Error("save config after unlinking", "err", saveErr)
-			}
-			page.Linked = false
-		} else {
-			s.Log.Warn("read settings for home page", "err", err)
-		}
-	}
-
 	page.Reconnect = !page.Linked && len(folders) > 0
 
 	s.render(w, "home", page)
-}
-
-func joinOrAll(exts []string) string {
-	if exts == nil {
-		return "all types"
-	}
-	return strings.Join(exts, ", ")
-}
-
-func humanSize(n int64) string {
-	if n <= 0 {
-		return "no limit"
-	}
-	return fmt.Sprintf("%.0f MB", float64(n)/(1024*1024))
-}
-
-func humanInterval(seconds int) string {
-	if seconds%60 == 0 {
-		return fmt.Sprintf("%d min", seconds/60)
-	}
-	return fmt.Sprintf("%d s", seconds)
 }
 
 // browse is the HTML file picker: os.ReadDir, one level, with breadcrumbs.
