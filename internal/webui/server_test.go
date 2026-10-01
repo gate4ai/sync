@@ -180,6 +180,45 @@ func TestAddFolderThenHomeListsIt(t *testing.T) {
 	}
 }
 
+func noRedirectClient() *http.Client {
+	return &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+}
+
+func TestAddingAFolderOnAnUnlinkedClientGoesStraightToLink(t *testing.T) {
+	f := newFixture(t)
+	f.cfg.CabinetURL = "https://cabinet.example"
+	dir := t.TempDir()
+
+	resp, err := noRedirectClient().PostForm(f.url("/folders"), map[string][]string{"path": {dir}})
+	if err != nil {
+		t.Fatalf("POST /folders: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	if len(f.cfg.Folders) != 1 {
+		t.Fatalf("Folders = %+v, want the folder saved before pairing", f.cfg.Folders)
+	}
+	want := "https://cabinet.example/link?client=c1&return=" + url.QueryEscape("http://"+f.srv.Addr()+"/")
+	if got := resp.Header.Get("Location"); got != want {
+		t.Errorf("Location = %q, want %q", got, want)
+	}
+}
+
+func TestAddingAFolderOnALinkedClientGoesHome(t *testing.T) {
+	f := newFixture(t)
+	f.cfg.Linked = true
+
+	resp, err := noRedirectClient().PostForm(f.url("/folders"), map[string][]string{"path": {t.TempDir()}})
+	if err != nil {
+		t.Fatalf("POST /folders: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	if got := resp.Header.Get("Location"); got != "/" {
+		t.Errorf("Location = %q, want /", got)
+	}
+}
+
 func TestAddingTheSameFolderTwiceIsANoOp(t *testing.T) {
 	f := newFixture(t)
 	dir := t.TempDir()
@@ -257,8 +296,7 @@ func TestSaveRedirectsToLinkWithTheClientID(t *testing.T) {
 	f := newFixture(t)
 	f.cfg.CabinetURL = "https://cabinet.example"
 
-	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	resp, err := client.PostForm(f.url("/save"), nil)
+	resp, err := noRedirectClient().PostForm(f.url("/save"), nil)
 	if err != nil {
 		t.Fatalf("POST /save: %v", err)
 	}

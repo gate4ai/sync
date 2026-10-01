@@ -244,21 +244,23 @@ func (s *Server) addFolder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.Mu.Lock()
+	exists := false
 	for _, f := range s.Config.Folders {
 		if f.Path == path {
-			s.Mu.Unlock()
-			http.Redirect(w, r, "/", http.StatusSeeOther)
-			return
+			exists = true
+			break
 		}
 	}
-	s.Config.Folders = append(s.Config.Folders, config.Folder{ID: config.NewID(), Path: path})
-	err = s.SaveConfig()
+	if !exists {
+		s.Config.Folders = append(s.Config.Folders, config.Folder{ID: config.NewID(), Path: path})
+		err = s.SaveConfig()
+	}
 	s.Mu.Unlock()
 
 	if err != nil {
 		s.Log.Error("save config after adding folder", "err", err)
 	}
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	s.redirectHomeOrLink(w, r)
 }
 
 // removeFolder disables the folder's mount on the server first — issue #38:
@@ -298,24 +300,38 @@ func (s *Server) removeFolder(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
-// save is the button that starts pairing: it sends the browser — the very
-// one showing this settings page — to /link, with a return URL pointing
-// back at this loopback server so /link can send the browser home once
-// pairing finishes instead of leaving the user stranded on the cabinet.
-// There is nothing else to persist here; folders are already saved as they
-// are added.
-func (s *Server) save(w http.ResponseWriter, r *http.Request) {
+// redirectHomeOrLink ends a request that changed the folder list: back to
+// the home page once this installation is linked, straight on to pairing
+// otherwise. Pressing Sync on a folder is already the user saying "sync
+// this with gate4.ai", so an unlinked client does not stop on the home page
+// asking for a second Connect click.
+func (s *Server) redirectHomeOrLink(w http.ResponseWriter, r *http.Request) {
 	s.Mu.Lock()
 	linked := s.Config.Linked
-	cabinet := s.Config.EffectiveCabinetURL()
-	clientID := s.Config.ClientID
+	dest := s.linkURL()
 	s.Mu.Unlock()
 
 	if linked {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
-	returnURL := "http://" + s.Addr() + "/"
-	dest := cabinet + "/link?client=" + url.QueryEscape(clientID) + "&return=" + url.QueryEscape(returnURL)
 	http.Redirect(w, r, dest, http.StatusSeeOther)
+}
+
+// linkURL is the cabinet's /link page for this installation, with a return
+// URL pointing back at this loopback server so /link can send the browser
+// home once pairing finishes instead of leaving the user stranded on the
+// cabinet. The caller holds s.Mu.
+func (s *Server) linkURL() string {
+	returnURL := "http://" + s.Addr() + "/"
+	return s.Config.EffectiveCabinetURL() + "/link?client=" + url.QueryEscape(s.Config.ClientID) + "&return=" + url.QueryEscape(returnURL)
+}
+
+// save is the Connect button: it starts pairing by sending the browser —
+// the very one showing this settings page — to /link. Adding a folder does
+// the same on its own (see redirectHomeOrLink); this button stays for the
+// case the user came back without finishing pairing. There is nothing else
+// to persist here; folders are already saved as they are added.
+func (s *Server) save(w http.ResponseWriter, r *http.Request) {
+	s.redirectHomeOrLink(w, r)
 }

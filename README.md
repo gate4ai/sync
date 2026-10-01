@@ -68,9 +68,10 @@ server.
 2. Clicking it opens a local settings page in the browser (`http://127.0.0.1:<port>/`) — the
    client has no GUI of its own, all configuration happens through the browser.
 3. There you pick local folders to sync (a plain HTML picker over `os.ReadDir`, no native
-   dialogs) and press "Connect to gate4.ai" — this opens
+   dialogs) and press "Sync" next to one — on an unlinked client this goes straight on to
    `https://gate4.ai/link?client=<id>`, where the installation gets attached to the
-   account's vault.
+   account's vault. No separate "Connect" click is needed; the "Connect to gate4.ai"
+   button on the home page stays only for coming back to an unfinished pairing.
 4. Once linked, the client registers each selected folder with the server on its own, gets a
    WebDAV credential per folder, and starts periodic two-way sync.
 5. Allowed file types, the maximum file size and the poll interval are set in the cabinet on

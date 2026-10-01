@@ -61,7 +61,7 @@ button, input[type=submit] { font: inherit; padding: .3rem .8rem; }
 <p>Connected to vault <strong>{{.VaultSlug}}</strong>.</p>
 <p class="status-line{{if .StatusIsError}} error{{end}}">Status: {{.Status}}</p>
 {{else}}
-<p class="muted">Not connected yet. Add the folders you want to sync, then press Connect.</p>
+<p class="muted">Not connected yet. Add a folder to sync — gate4.ai will then ask you to connect this computer to your account.</p>
 {{end}}
 
 {{template "folders-list" .}}
