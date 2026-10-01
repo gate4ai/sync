@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 )
 
 // NewID returns a random UUIDv4 string — used for both ClientID and each
@@ -119,6 +121,58 @@ func (c *Config) EffectiveCabinetURL() string {
 		return DefaultCabinetURL
 	}
 	return c.CabinetURL
+}
+
+// hostRE accepts a plain DNS name with at least one dot ("gate4.ai",
+// "test.gate4.ai") — no scheme, port or path, since both URLs are built
+// from it.
+var hostRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$`)
+
+// SetHost points the client at the gate4.ai deployment on host for good:
+// unlike $GATE4AI_SYNC_HOST it is saved, so a launch from autostart or the
+// Start menu, with no arguments, still talks to the same deployment. The
+// installer passes it (`gate4ai-sync --host test.gate4.ai`) because it
+// knows which deployment it was downloaded from.
+//
+// Pairing and every folder's mount credential belong to the old
+// deployment, so a change of host drops them; the caller also removes the
+// folders' manifests (RemoveManifests) once the config is saved — a
+// manifest from the old server would make the new, empty one look like
+// every file had been deleted there. It reports whether anything changed.
+func (c *Config) SetHost(host string) (bool, error) {
+	host = strings.ToLower(strings.TrimSpace(host))
+	if !hostRE.MatchString(host) {
+		return false, fmt.Errorf("invalid host %q: want a name like gate4.ai", host)
+	}
+	serverURL, cabinetURL := "https://dav."+host, "https://"+host
+	current := c.ServerURL
+	if current == "" {
+		current = DefaultServerURL
+	}
+	if current == serverURL {
+		return false, nil
+	}
+	c.ServerURL, c.CabinetURL = serverURL, cabinetURL
+	c.Unlink()
+	for i := range c.Folders {
+		c.Folders[i].Slug, c.Folders[i].Username, c.Folders[i].Secret = "", "", ""
+	}
+	return true, nil
+}
+
+// RemoveManifests deletes the sync manifest of every folder, so the next
+// sync of each starts from scratch rather than from another server's state.
+func (c *Config) RemoveManifests() error {
+	for _, f := range c.Folders {
+		p, err := ManifestPath(f.ID)
+		if err != nil {
+			return err
+		}
+		if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
 }
 
 // Folder looks up a folder by id.

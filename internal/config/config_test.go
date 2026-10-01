@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -64,6 +65,64 @@ func TestSyncHostEnvOverridesBothURLsAndTakesPriorityOverSavedOnes(t *testing.T)
 	}
 	if got := cfg.EffectiveCabinetURL(); got != "https://test.gate4.ai" {
 		t.Errorf("EffectiveCabinetURL = %q, want the env override", got)
+	}
+}
+
+func TestSetHostSwitchesDeploymentAndDropsItsPairing(t *testing.T) {
+	t.Setenv("GATE4AI_SYNC_DIR", t.TempDir())
+	cfg := &Config{
+		Linked:    true,
+		VaultSlug: "notes",
+		Folders:   []Folder{{ID: "f1", Path: "/tmp/docs", Slug: "docs", Username: "u", Secret: "s"}},
+	}
+	manifest, err := ManifestPath("f1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(manifest), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifest, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	changed, err := cfg.SetHost("Test.gate4.ai")
+	if err != nil || !changed {
+		t.Fatalf("SetHost = %v, %v; want a change", changed, err)
+	}
+	if cfg.EffectiveServerURL() != "https://dav.test.gate4.ai" || cfg.EffectiveCabinetURL() != "https://test.gate4.ai" {
+		t.Errorf("URLs = %q, %q", cfg.EffectiveServerURL(), cfg.EffectiveCabinetURL())
+	}
+	if cfg.Linked || cfg.VaultSlug != "" || cfg.Folders[0].Registered() || cfg.Folders[0].Slug != "" {
+		t.Errorf("pairing of the old deployment survived: %+v", cfg)
+	}
+	if cfg.Folders[0].Path != "/tmp/docs" {
+		t.Errorf("folder selection lost: %+v", cfg.Folders)
+	}
+	if err := cfg.RemoveManifests(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(manifest); !os.IsNotExist(err) {
+		t.Errorf("manifest still there: %v", err)
+	}
+}
+
+func TestSetHostKeepsPairingWhenTheHostIsTheSame(t *testing.T) {
+	cfg := &Config{Linked: true, Folders: []Folder{{ID: "f1", Username: "u", Secret: "s"}}}
+	changed, err := cfg.SetHost("gate4.ai")
+	if err != nil || changed {
+		t.Fatalf("SetHost(default host) = %v, %v; want no change", changed, err)
+	}
+	if !cfg.Linked || !cfg.Folders[0].Registered() {
+		t.Error("an unchanged host dropped the pairing")
+	}
+}
+
+func TestSetHostRejectsAnythingButAName(t *testing.T) {
+	for _, h := range []string{"", "https://gate4.ai", "gate4.ai:443", "gate4.ai/x", "localhost", "a b.ai"} {
+		if _, err := (&Config{}).SetHost(h); err == nil {
+			t.Errorf("SetHost(%q) accepted", h)
+		}
 	}
 }
 

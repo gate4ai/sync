@@ -80,15 +80,28 @@ server.
 ## Which server it talks to
 
 By default the client talks to production — `gate4.ai` (cabinet) and `dav.gate4.ai`
-(control API + WebDAV). To point it at the test stand instead, set this before launch:
+(control API + WebDAV). The host is substituted into both addresses (`https://<host>` for
+the cabinet/`link`, `https://dav.<host>` for the control API/WebDAV). Two ways to change it:
 
-```
-GATE4AI_SYNC_HOST=test.gate4.ai go run ./cmd/gate4ai-sync
-```
+- `--host`, saved to `config.json`, so every later launch (autostart, Start menu) keeps it:
 
-The value is substituted into both addresses (`https://<host>` for the cabinet/`link`,
-`https://dav.<host>` for the control API/WebDAV) and is **never saved** to `config.json` —
-it is a launch-time switch, not a persistent setting. Without it, `gate4.ai` is used.
+  ```
+  gate4ai-sync --host test.gate4.ai
+  ```
+
+  This is what the installer from a deployment passes — `curl -fsSL
+  https://test.gate4.ai/install.sh | sh` sets up a client for the test stand. Switching to a
+  different host drops the pairing, every folder's mount credential and its sync manifest,
+  since all of them belong to the previous server; the folder selection stays. The tray
+  tooltip names the host whenever it isn't `gate4.ai`.
+
+- `GATE4AI_SYNC_HOST`, for one run only, **never saved** — handy in development:
+
+  ```
+  GATE4AI_SYNC_HOST=test.gate4.ai go run ./cmd/gate4ai-sync
+  ```
+
+  It takes priority over whatever `config.json` says.
 
 ## Building
 
