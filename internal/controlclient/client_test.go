@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gate4ai/sync/internal/controlclient"
 )
@@ -12,9 +13,11 @@ import (
 // fakeServer emulates just enough of internal/syncapi (gate4ai/server) to
 // exercise the client against the contract in docs/sync-api.md.
 type fakeServer struct {
-	linked   bool
-	mounts   map[string]string // folder_id -> slug
-	settings controlclient.Settings
+	linked bool
+	// pairingQuery is the raw query of the last pairing-status request.
+	pairingQuery string
+	mounts       map[string]string // folder_id -> slug
+	settings     controlclient.Settings
 }
 
 func newFakeServer(t *testing.T) (*httptest.Server, *fakeServer) {
@@ -66,6 +69,7 @@ func (fs *fakeServer) serve(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 
 	case len(r.URL.Path) > len("/api/sync/v1/pairing/") && r.Method == http.MethodGet:
+		fs.pairingQuery = r.URL.RawQuery
 		status := "pending"
 		if fs.linked {
 			status = "linked"
@@ -126,7 +130,7 @@ func TestPairingStatusReflectsLinking(t *testing.T) {
 	srv, fs := newFakeServer(t)
 	c := &controlclient.Client{BaseURL: srv.URL, ClientID: "c1"}
 
-	pending, err := c.PairingStatus(t.Context())
+	pending, err := c.PairingStatus(t.Context(), 0)
 	if err != nil {
 		t.Fatalf("PairingStatus: %v", err)
 	}
@@ -135,11 +139,30 @@ func TestPairingStatusReflectsLinking(t *testing.T) {
 	}
 
 	fs.linked = true
-	linked, err := c.PairingStatus(t.Context())
+	linked, err := c.PairingStatus(t.Context(), 0)
 	if err != nil {
 		t.Fatalf("PairingStatus: %v", err)
 	}
 	if linked.Status != "linked" {
 		t.Fatalf("Status = %q, want linked", linked.Status)
+	}
+}
+
+func TestPairingStatusAsksTheServerToWait(t *testing.T) {
+	srv, fs := newFakeServer(t)
+	c := &controlclient.Client{BaseURL: srv.URL, ClientID: "c1"}
+
+	if _, err := c.PairingStatus(t.Context(), 25*time.Second); err != nil {
+		t.Fatalf("PairingStatus: %v", err)
+	}
+	if fs.pairingQuery != "wait=25" {
+		t.Errorf("query = %q, want wait=25", fs.pairingQuery)
+	}
+
+	if _, err := c.PairingStatus(t.Context(), 0); err != nil {
+		t.Fatalf("PairingStatus: %v", err)
+	}
+	if fs.pairingQuery != "" {
+		t.Errorf("query = %q, want none without a wait", fs.pairingQuery)
 	}
 }

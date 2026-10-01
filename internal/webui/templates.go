@@ -175,7 +175,7 @@ const homeHTML = `<!doctype html>
 <head>
 {{template "head"}}
 <title>gate4.ai Sync Client</title>
-{{if not .Linked}}<meta http-equiv="refresh" content="3">{{end}}
+{{if not .Linked}}<meta http-equiv="refresh" content="1">{{end}}
 </head>
 <body>
 {{template "header" .}}

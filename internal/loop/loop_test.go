@@ -24,7 +24,9 @@ import (
 // gate4ai/server), so one fake stands in for both here too.
 type fakeServer struct {
 	linked bool
-	files  map[string][]byte
+	// pairingWait is the ?wait= of the last pairing-status request.
+	pairingWait string
+	files       map[string][]byte
 	// propfindUnauthorized makes every PROPFIND answer 401, simulating a
 	// mount whose credential the server no longer accepts.
 	propfindUnauthorized bool
@@ -41,6 +43,7 @@ func newFakeServer(t *testing.T) (*httptest.Server, *fakeServer) {
 func (fs *fakeServer) serve(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.URL.Path == "/api/sync/v1/pairing/c1/status":
+		fs.pairingWait = r.URL.Query().Get("wait")
 		status := "pending"
 		if fs.linked {
 			status = "linked"
@@ -88,17 +91,22 @@ func (fs *fakeServer) serve(w http.ResponseWriter, r *http.Request) {
 }
 
 func TestRunOnceDoesNothingUntilLinked(t *testing.T) {
-	srv, _ := newFakeServer(t)
+	srv, fs := newFakeServer(t)
 	t.Setenv("GATE4AI_SYNC_DIR", t.TempDir())
 	cfg := &config.Config{ClientID: "c1", ServerURL: srv.URL}
 	mu := &sync.Mutex{}
 
 	interval := runOnce(t.Context(), cfg, mu, cfg.Save, &status.Status{}, planCaches{}, slog.New(slog.DiscardHandler))
-	if interval != pendingInterval {
-		t.Errorf("interval = %v, want pendingInterval before linking", interval)
+	// The fake answers pending at once, like a server that does not hold the
+	// request, so the loop must not spin on it.
+	if interval != pairingRecheck {
+		t.Errorf("interval = %v, want pairingRecheck before linking", interval)
 	}
 	if cfg.Linked {
 		t.Error("Linked became true before the server reported it")
+	}
+	if fs.pairingWait != "25" {
+		t.Errorf("wait = %q, want the loop to ask the server to hold the request for 25s", fs.pairingWait)
 	}
 }
 

@@ -24,6 +24,15 @@ import (
 // long enough not to hammer a server that is genuinely down.
 const pendingInterval = 15 * time.Second
 
+// pairingWait is how long one pairing-status request may be held by the
+// server. The owner's click on Connect then reaches the client as soon as it
+// happens, instead of at the next poll.
+const pairingWait = 25 * time.Second
+
+// pairingRecheck is the pause after a pairing answer that came back pending
+// well before pairingWait was up — a server that does not hold the request.
+const pairingRecheck = 2 * time.Second
+
 // Run blocks until ctx is done, running one iteration immediately and then
 // on whatever interval the server's settings (or pendingInterval, before
 // that is known) say, or as soon as wake receives — the web UI sends on it
@@ -54,14 +63,18 @@ func runOnce(ctx context.Context, cfg *config.Config, mu *sync.Mutex, saveConfig
 	control := &controlclient.Client{BaseURL: serverURL, ClientID: clientID}
 
 	if !linked {
-		pairing, err := control.PairingStatus(ctx)
+		asked := time.Now()
+		pairing, err := control.PairingStatus(ctx, pairingWait)
 		if err != nil {
 			log.Warn("read pairing status", "err", err)
 			st.RecordError(err, time.Now())
 			return pendingInterval
 		}
 		if pairing.Status != "linked" {
-			return pendingInterval
+			if time.Since(asked) >= pairingWait/2 {
+				return 0
+			}
+			return pairingRecheck
 		}
 		mu.Lock()
 		cfg.Linked, cfg.VaultSlug = true, pairing.VaultSlug

@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -176,8 +177,16 @@ type PairingStatus struct {
 	VaultSlug string `json:"vault_slug"`
 }
 
-func (c *Client) PairingStatus(ctx context.Context) (PairingStatus, error) {
+// PairingStatus asks whether the owner has confirmed this client. A positive
+// wait makes the server hold a "pending" answer for up to that long and
+// answer "linked" the moment the owner confirms; zero answers at once. A
+// server that predates the parameter ignores it and answers at once.
+func (c *Client) PairingStatus(ctx context.Context, wait time.Duration) (PairingStatus, error) {
+	path := "/api/sync/v1/pairing/" + c.ClientID + "/status"
+	if wait > 0 {
+		path += "?wait=" + strconv.Itoa(int(wait/time.Second))
+	}
 	var s PairingStatus
-	err := c.do(ctx, http.MethodGet, "/api/sync/v1/pairing/"+c.ClientID+"/status", nil, &s)
+	err := c.do(ctx, http.MethodGet, path, nil, &s)
 	return s, err
 }
