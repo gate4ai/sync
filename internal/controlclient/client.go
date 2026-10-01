@@ -93,9 +93,6 @@ type Settings struct {
 	PolicyVersion       string `json:"policy_version"`
 	PollIntervalSeconds int    `json:"poll_interval_seconds"`
 	VaultSlug           string `json:"vault_slug"`
-	// SettingsURL is the cabinet's "Sync client" tab for this vault, or
-	// empty if no folder has been registered yet (see docs/sync-api.md).
-	SettingsURL string `json:"settings_url"`
 }
 
 func (c *Client) Settings(ctx context.Context) (Settings, error) {

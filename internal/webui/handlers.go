@@ -17,6 +17,13 @@ import (
 
 type folderRow struct {
 	ID, Path, Status string
+	// Slug, FilesURL and SettingsURL are set once the folder's mount is
+	// registered: the slug in its status line links to the mount's files in
+	// the cabinet, and a gear next to Remove opens that mount's settings —
+	// the same pair of links the cabinet's own vault list gives each mount.
+	// Settings live per mount on the server, so the link sits on the folder
+	// rather than on the page-wide "Server settings" block.
+	Slug, FilesURL, SettingsURL string
 }
 
 type homePage struct {
@@ -27,12 +34,8 @@ type homePage struct {
 	Folders       []folderRow
 	Settings      []settingRow
 	CabinetURL    string
-	// SettingsURL is where the "Server settings" heading links — the
-	// vault's "Sync client" tab in the cabinet when the server has one to
-	// offer (a folder has been registered), the plain cabinet otherwise.
-	SettingsURL string
-	ClientID    string
-	HomeURL     string
+	ClientID      string
+	HomeURL       string
 }
 
 // settingRow is one line of the "Server settings" block — see its own
@@ -75,14 +78,18 @@ func relativeTime(now, t time.Time) string {
 func folderRows(cfg config.Config, folders []config.Folder) []folderRow {
 	var rows []folderRow
 	for _, f := range folders {
-		status := "waiting to connect"
+		row := folderRow{ID: f.ID, Path: f.Path, Status: "waiting to connect"}
 		switch {
 		case f.Registered():
-			status = "synced as " + f.Slug
+			slug := url.PathEscape(f.Slug)
+			row.Status = "synced as " + f.Slug
+			row.Slug = f.Slug
+			row.FilesURL = cfg.EffectiveCabinetURL() + "/files/" + slug
+			row.SettingsURL = cfg.EffectiveCabinetURL() + "/settings/" + slug
 		case cfg.Linked:
-			status = "registering…"
+			row.Status = "registering…"
 		}
-		rows = append(rows, folderRow{ID: f.ID, Path: f.Path, Status: status})
+		rows = append(rows, row)
 	}
 	return rows
 }
@@ -94,13 +101,12 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) {
 	s.Mu.Unlock()
 
 	page := homePage{
-		Linked:      cfg.Linked,
-		VaultSlug:   cfg.VaultSlug,
-		CabinetURL:  cfg.EffectiveCabinetURL(),
-		SettingsURL: cfg.EffectiveCabinetURL(),
-		ClientID:    cfg.ClientID,
-		HomeURL:     cfg.EffectiveCabinetURL(),
-		Folders:     folderRows(cfg, folders),
+		Linked:     cfg.Linked,
+		VaultSlug:  cfg.VaultSlug,
+		CabinetURL: cfg.EffectiveCabinetURL(),
+		ClientID:   cfg.ClientID,
+		HomeURL:    cfg.EffectiveCabinetURL(),
+		Folders:    folderRows(cfg, folders),
 	}
 	if cfg.Linked {
 		snap := s.Status.Snapshot()
@@ -114,9 +120,6 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) {
 				{Name: "Allowed types", Value: joinOrAll(settings.AllowedExtensions)},
 				{Name: "Max file size", Value: humanSize(settings.MaxFileSizeBytes)},
 				{Name: "Poll interval", Value: humanInterval(settings.PollIntervalSeconds)},
-			}
-			if settings.SettingsURL != "" {
-				page.SettingsURL = settings.SettingsURL
 			}
 		} else if errors.Is(err, controlclient.ErrUnauthorized) {
 			// The server no longer accepts this client (pairing revoked) —

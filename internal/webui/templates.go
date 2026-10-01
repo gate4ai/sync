@@ -90,7 +90,10 @@ h2 { font-size: 1rem; font-weight: 500; margin: 0; }
 .row { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: .6rem 0; border-top: 1px solid var(--border); }
 .card-head + .row, .path + .row { border-top: none; }
 .row .name { overflow-wrap: anywhere; min-width: 0; }
-.row form, .row .tag { flex: none; }
+.row form, .row .tag, .row-actions { flex: none; }
+.row-actions { display: flex; align-items: center; gap: .25rem; }
+.icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 2rem; height: 2rem; border-radius: var(--radius); color: var(--muted-foreground); }
+.icon-btn:hover { background: var(--muted); color: var(--foreground); }
 .row-main { display: flex; flex-direction: column; min-width: 0; }
 .status { color: var(--muted-foreground); font-size: .8rem; }
 
@@ -126,12 +129,15 @@ button.ghost:hover { background: color-mix(in oklch, var(--destructive) 10%, tra
 {{end}}
 `
 
-// foldersListHTML is the "already configured" list — path, status, Remove —
+// foldersListHTML is the "already configured" list — path, status, a gear
+// to the mount's settings on gate4.ai, Remove —
 // shared by the home page and the browse page. It has to keep showing up on
 // browse too: a folder added five directories away would otherwise vanish
 // from view the moment you're browsing anywhere else looking for another
 // one to add.
 const foldersListHTML = `
+{{define "gear"}}<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>{{end}}
+
 {{define "folders-list"}}
 <section class="card">
   <div class="card-head"><h2>Folders</h2></div>
@@ -139,12 +145,15 @@ const foldersListHTML = `
   <div class="row folder">
     <div class="row-main">
       <span class="name">{{.Path}}</span>
-      <span class="status">{{.Status}}</span>
+      <span class="status">{{if .FilesURL}}synced as <a href="{{.FilesURL}}" target="_blank">{{.Slug}}</a>{{else}}{{.Status}}{{end}}</span>
     </div>
-    <form class="inline" method="post" action="/folders/remove">
-      <input type="hidden" name="id" value="{{.ID}}">
-      <button class="ghost" type="submit">Remove</button>
-    </form>
+    <div class="row-actions">
+      {{if .SettingsURL}}<a class="icon-btn" href="{{.SettingsURL}}" target="_blank" title="Settings for {{.Slug}} on gate4.ai" aria-label="Settings for {{.Slug}}">{{template "gear"}}</a>{{end}}
+      <form class="inline" method="post" action="/folders/remove">
+        <input type="hidden" name="id" value="{{.ID}}">
+        <button class="ghost" type="submit">Remove</button>
+      </form>
+    </div>
   </div>
   {{else}}
   <p class="muted">No folders yet.</p>
@@ -177,7 +186,7 @@ const homeHTML = `<!doctype html>
 
 {{if .Settings}}
 <section class="card settings">
-  <div class="card-head"><h2>Server settings</h2><a href="{{.SettingsURL}}" target="_blank">Change on gate4.ai</a></div>
+  <div class="card-head"><h2>Server settings</h2></div>
   {{range .Settings}}
   <div class="setting-row"><span class="setting-name">{{.Name}}</span> {{.Value}}</div>
   {{end}}

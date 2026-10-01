@@ -360,7 +360,7 @@ func TestBrowseShowsTheFullFoldersListEvenWhenBrowsingElsewhere(t *testing.T) {
 	if !strings.Contains(string(body), "/home/alex/Documents/obsidian") {
 		t.Errorf("browse page dropped the configured folder while browsing elsewhere:\n%s", body)
 	}
-	if !strings.Contains(string(body), "synced as obsidian") {
+	if !strings.Contains(string(body), `synced as <a href="https://gate4.ai/files/obsidian"`) {
 		t.Errorf("browse page is missing the folder's status:\n%s", body)
 	}
 	if !strings.Contains(string(body), `name="id" value="f1"`) {
@@ -387,5 +387,36 @@ func TestBrowseKeepsAnAlreadySyncedFolderListedWithoutASyncButton(t *testing.T) 
 	}
 	if !strings.Contains(string(body), "Already syncing") {
 		t.Errorf("browse page does not mark the already-synced folder:\n%s", body)
+	}
+}
+
+func TestHomeLinksARegisteredFolderToItsFilesAndSettings(t *testing.T) {
+	f := newFixture(t)
+	f.cfg.Linked = true
+	f.cfg.CabinetURL = "https://cabinet.example"
+	f.cfg.Folders = []config.Folder{
+		{ID: "f1", Path: "/tmp/obsidian", Username: "u", Secret: "s", Slug: "obsidian-copy"},
+		{ID: "f2", Path: "/tmp/pending"},
+	}
+
+	resp, err := http.Get(f.url("/"))
+	if err != nil {
+		t.Fatalf("GET /: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	page := string(body)
+
+	if !strings.Contains(page, `synced as <a href="https://cabinet.example/files/obsidian-copy"`) {
+		t.Errorf("folder slug is not a link to its files:\n%s", page)
+	}
+	if !strings.Contains(page, `href="https://cabinet.example/settings/obsidian-copy"`) {
+		t.Errorf("folder has no settings link:\n%s", page)
+	}
+	if strings.Count(page, `class="icon-btn"`) != 1 {
+		t.Error("only the registered folder should get a settings link")
+	}
+	if strings.Contains(page, "Change on gate4.ai") {
+		t.Error("the page-wide settings link is still there")
 	}
 }
