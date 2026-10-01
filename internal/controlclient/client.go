@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 )
 
 const clientIDHeader = "X-Gate4AI-Client-ID"
@@ -37,8 +38,13 @@ func (c *Client) client() *http.Client {
 	if c.HTTPClient != nil {
 		return c.HTTPClient
 	}
-	return http.DefaultClient
+	return defaultHTTPClient
 }
+
+// defaultHTTPClient has a timeout, unlike http.DefaultClient: a control call
+// that never answers would otherwise hold a web UI request (Remove waits on
+// one) or the whole sync loop for as long as the connection stays open.
+var defaultHTTPClient = &http.Client{Timeout: 2 * time.Minute}
 
 func (c *Client) do(ctx context.Context, method, path string, body any, out any) error {
 	var reqBody io.Reader

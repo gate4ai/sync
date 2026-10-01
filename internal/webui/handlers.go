@@ -275,6 +275,9 @@ func (s *Server) addFolder(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.Log.Error("save config after adding folder", "err", err)
 	}
+	if !exists && s.Wake != nil {
+		s.Wake()
+	}
 	s.redirectHomeOrLink(w, r)
 }
 
