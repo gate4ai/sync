@@ -26,16 +26,23 @@ const pendingInterval = 15 * time.Second
 
 // Run blocks until ctx is done, running one iteration immediately and then
 // on whatever interval the server's settings (or pendingInterval, before
-// that is known) say. st records the outcome of each iteration — see
-// internal/status — for the local web UI's "Status" line.
-func Run(ctx context.Context, cfg *config.Config, mu *sync.Mutex, saveConfig func() error, st *status.Status, log *slog.Logger) {
+// that is known) say, or as soon as wake receives — the web UI sends on it
+// when the folder list changes, so a newly added folder is registered now
+// rather than after the rest of the poll interval. st records the outcome of
+// each iteration — see internal/status — for the local web UI's "Status"
+// line.
+func Run(ctx context.Context, cfg *config.Config, mu *sync.Mutex, saveConfig func() error, st *status.Status, wake <-chan struct{}, log *slog.Logger) {
 	plans := planCaches{}
 	for {
 		interval := runOnce(ctx, cfg, mu, saveConfig, st, plans, log)
+		timer := time.NewTimer(interval)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return
-		case <-time.After(interval):
+		case <-wake:
+			timer.Stop()
+		case <-timer.C:
 		}
 	}
 }
@@ -88,15 +95,26 @@ func runOnce(ctx context.Context, cfg *config.Config, mu *sync.Mutex, saveConfig
 	folders := append([]config.Folder(nil), cfg.Folders...)
 	mu.Unlock()
 
+	// Every folder is registered before any is synced: registering is one
+	// quick call, syncing a big folder is not, and a folder added just now
+	// should not sit at "registering…" behind the others' file transfers.
 	var lastErr error
+	for i, f := range folders {
+		if f.Registered() {
+			continue
+		}
+		f, err = register(ctx, control, saveConfig, cfg, mu, f)
+		if err != nil {
+			log.Error("register folder", "path", f.Path, "err", err)
+			lastErr = err
+			continue
+		}
+		folders[i] = f
+	}
+
 	for _, f := range folders {
 		if !f.Registered() {
-			f, err = register(ctx, control, saveConfig, cfg, mu, f)
-			if err != nil {
-				log.Error("register folder", "path", f.Path, "err", err)
-				lastErr = err
-				continue
-			}
+			continue
 		}
 
 		manifestPath, err := config.ManifestPath(f.ID)

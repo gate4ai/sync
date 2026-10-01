@@ -1,6 +1,7 @@
 package loop
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gate4ai/sync/internal/config"
 	"github.com/gate4ai/sync/internal/controlclient"
@@ -196,5 +198,43 @@ func TestRunOnceUnlinksOnStaleMountCredential(t *testing.T) {
 	}
 	if cfg.Folders[0].Registered() {
 		t.Errorf("folder is still registered after a 401 from its mount: %+v", cfg.Folders[0])
+	}
+}
+
+func TestRunRegistersANewFolderAsSoonAsItIsWoken(t *testing.T) {
+	srv, fs := newFakeServer(t)
+	fs.linked = true
+	t.Setenv("GATE4AI_SYNC_DIR", t.TempDir())
+
+	cfg := &config.Config{ClientID: "c1", ServerURL: srv.URL, Linked: true}
+	mu := &sync.Mutex{}
+	wake := make(chan struct{}, 1)
+	done := make(chan struct{})
+	ctx, cancel := context.WithCancel(t.Context())
+	go func() {
+		defer close(done)
+		Run(ctx, cfg, mu, cfg.Save, &status.Status{}, wake, slog.New(slog.DiscardHandler))
+	}()
+	defer func() { cancel(); <-done }()
+
+	// The fake's poll interval is an hour, so only the wake can get this
+	// folder registered within the test's lifetime.
+	mu.Lock()
+	cfg.Folders = append(cfg.Folders, config.Folder{ID: "folder-1", Path: t.TempDir()})
+	mu.Unlock()
+	wake <- struct{}{}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		mu.Lock()
+		registered := len(cfg.Folders) == 1 && cfg.Folders[0].Registered()
+		mu.Unlock()
+		if registered {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the folder was not registered after a wake")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

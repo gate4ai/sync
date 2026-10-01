@@ -79,6 +79,9 @@ func run(log *slog.Logger) error {
 	defer cancel()
 
 	var st status.Status
+	// Buffered by one: a wake sent while the loop is mid-iteration is kept
+	// for the next pass, and any number of them collapse into that one.
+	wake := make(chan struct{}, 1)
 	ui := &webui.Server{
 		Config:     cfg,
 		Mu:         &mu,
@@ -89,7 +92,13 @@ func run(log *slog.Logger) error {
 			return &controlclient.Client{BaseURL: cfg.EffectiveServerURL(), ClientID: cfg.ClientID}
 		},
 		Status: &st,
-		Log:    log,
+		Wake: func() {
+			select {
+			case wake <- struct{}{}:
+			default:
+			}
+		},
+		Log: log,
 	}
 	if err := ui.Start(); err != nil {
 		return fmt.Errorf("start local web UI: %w", err)
@@ -106,7 +115,7 @@ func run(log *slog.Logger) error {
 		}
 	}
 
-	go loop.Run(ctx, cfg, &mu, saveConfig, &st, log)
+	go loop.Run(ctx, cfg, &mu, saveConfig, &st, wake, log)
 
 	// A signal (Ctrl+C, or a service manager stopping the process) shuts
 	// down the same way the tray's own Quit item does.

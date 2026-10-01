@@ -31,7 +31,10 @@ type Server struct {
 	// and what, if anything, went wrong — shown as the home page's "Status"
 	// line.
 	Status *status.Status
-	Log    *slog.Logger
+	// Wake asks the sync loop to run now instead of at the end of its poll
+	// interval; handlers call it after changing the folder list. Optional.
+	Wake func()
+	Log  *slog.Logger
 
 	listener net.Listener
 	http     *http.Server
