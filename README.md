@@ -15,12 +15,13 @@ One command for both — installs the latest release and starts the app:
 curl -fsSL https://gate4.ai/install.sh | sh
 ```
 
-On macOS it uses the [gate4ai/homebrew-gate4ai](https://github.com/gate4ai/homebrew-gate4ai)
-tap when Homebrew is installed, otherwise the universal `.dmg` (one build for Apple Silicon
-and Intel). The app is not notarized/signed with an Apple Developer ID, but neither path
-trips Gatekeeper: nothing is downloaded by a browser, so nothing is quarantined. On Linux it
-installs the amd64 `.deb` with apt. The script's source is `web/public/install.sh` in
-[gate4ai/server](https://github.com/gate4ai/server).
+On macOS it copies the app from the universal `.dmg` (one build for Apple Silicon and Intel)
+into Applications. The app is not notarized/signed with an Apple Developer ID, but Gatekeeper
+does not stop it: nothing is downloaded by a browser, and the script clears the quarantine
+flag. On Linux it installs the amd64 `.deb` with apt. The script's source is
+`web/public/install.sh` in [gate4ai/server](https://github.com/gate4ai/server); each
+deployment serves it with its own host, and starts the client with `--host` (see
+[Which server it talks to](#which-server-it-talks-to)).
 
 By hand on Ubuntu / Debian:
 
