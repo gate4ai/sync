@@ -6,10 +6,12 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 
@@ -36,14 +38,34 @@ func main() {
 // defer (cancel, stopSignals) is ever silently skipped by one buried deep
 // in this function.
 func run(log *slog.Logger) error {
+	// --host is how an installer says which gate4.ai deployment it came
+	// from (install.sh from test.gate4.ai passes test.gate4.ai); it is
+	// saved, so later launches without it keep talking to the same one.
+	host := flag.String("host", "", "gate4.ai deployment to use from now on, e.g. test.gate4.ai")
+	if err := flag.CommandLine.Parse(withoutProcessSerial(os.Args[1:])); err != nil {
+		return err
+	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
+	}
+	hostChanged := false
+	if *host != "" {
+		if hostChanged, err = cfg.SetHost(*host); err != nil {
+			return err
+		}
 	}
 	var mu sync.Mutex
 	saveConfig := func() error { return cfg.Save() }
 	if err := saveConfig(); err != nil {
 		return fmt.Errorf("save config: %w", err)
+	}
+	if hostChanged {
+		if err := cfg.RemoveManifests(); err != nil {
+			return fmt.Errorf("remove manifests of the previous host: %w", err)
+		}
+		log.Info("switched deployment", "server", cfg.EffectiveServerURL())
 	}
 	log.Info("gate4ai-sync starting", "client_id", cfg.ClientID, "linked", cfg.Linked)
 
@@ -104,4 +126,17 @@ func run(log *slog.Logger) error {
 		return fmt.Errorf("tray: %w", err)
 	}
 	return nil
+}
+
+// withoutProcessSerial drops the -psn_<n>_<n> argument macOS's Launch
+// Services has been known to hand an app opened from Finder; the flag
+// package would otherwise refuse to start over an unknown flag.
+func withoutProcessSerial(args []string) []string {
+	out := args[:0:0]
+	for _, a := range args {
+		if !strings.HasPrefix(a, "-psn_") {
+			out = append(out, a)
+		}
+	}
+	return out
 }

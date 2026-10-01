@@ -8,6 +8,7 @@ import (
 	_ "embed"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/gate4ai/sync/internal/browser"
@@ -35,6 +36,7 @@ const iconPollInterval = 5 * time.Second
 // caller needs (nothing is required; the sync loop's own manifest writes
 // are already durable after every poll, not just at shutdown).
 func Run(settingsURL, cabinetURL string, st *status.Status, onQuit func(), log *slog.Logger) error {
+	title := trayTitle(cabinetURL)
 	tray := systray.New()
 	menu := systray.NewMenu()
 	menu.Add("Open settings", func() {
@@ -70,14 +72,14 @@ func Run(settingsURL, cabinetURL string, st *status.Status, onQuit func(), log *
 	// rather than showing them collapsed. Without this call the tray
 	// registers correctly on D-Bus (Introspect and the menu both work) but
 	// never actually appears in the panel.
-	tray.SetIcon(iconPNG).SetTooltip("gate4.ai sync").SetMenu(menu).Show()
+	tray.SetIcon(iconPNG).SetTooltip(title).SetMenu(menu).Show()
 
 	errorIcon, err := errorBadge(iconPNG)
 	if err != nil {
 		log.Warn("build error badge icon", "err", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	go watchStatus(ctx, tray, errorIcon, st)
+	go watchStatus(ctx, tray, title, errorIcon, st)
 	defer cancel()
 
 	return tray.Run()
@@ -87,7 +89,7 @@ func Run(settingsURL, cabinetURL string, st *status.Status, onQuit func(), log *
 // plain icon and the red-badged one, so a sync failure is visible without
 // opening the menu or the web UI. It runs until ctx is canceled, which
 // happens when Run's own Run() call returns (Quit was clicked).
-func watchStatus(ctx context.Context, tray *systray.SystemTray, errorIcon []byte, st *status.Status) {
+func watchStatus(ctx context.Context, tray *systray.SystemTray, title string, errorIcon []byte, st *status.Status) {
 	wasError := false
 	tick := time.NewTicker(iconPollInterval)
 	defer tick.Stop()
@@ -97,9 +99,9 @@ func watchStatus(ctx context.Context, tray *systray.SystemTray, errorIcon []byte
 		if isError != wasError {
 			wasError = isError
 			if isError && errorIcon != nil {
-				tray.SetIcon(errorIcon).SetTooltip("gate4.ai sync — " + snap.Error)
+				tray.SetIcon(errorIcon).SetTooltip(title + " — " + snap.Error)
 			} else {
-				tray.SetIcon(iconPNG).SetTooltip("gate4.ai sync")
+				tray.SetIcon(iconPNG).SetTooltip(title)
 			}
 		}
 		select {
@@ -108,4 +110,15 @@ func watchStatus(ctx context.Context, tray *systray.SystemTray, errorIcon []byte
 		case <-tick.C:
 		}
 	}
+}
+
+// trayTitle names the deployment in the tooltip whenever it isn't
+// production, so a tester can tell at a glance which server the client on
+// this machine is talking to.
+func trayTitle(cabinetURL string) string {
+	host := strings.TrimPrefix(cabinetURL, "https://")
+	if host == "gate4.ai" {
+		return "gate4.ai sync"
+	}
+	return "gate4.ai sync (" + host + ")"
 }
