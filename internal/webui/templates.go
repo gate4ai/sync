@@ -13,9 +13,10 @@ var logoSVG []byte
 // from disk — this is a single-binary CLI tool, not a web app with a
 // deploy step that could lose a sibling assets/ directory.
 var templates = map[string]string{
-	"home":   homeHTML + layoutHTML + foldersListHTML,
-	"browse": browseHTML + layoutHTML + foldersListHTML,
-	"error":  errorHTML + layoutHTML + foldersListHTML,
+	"home":    homeHTML + layoutHTML + foldersListHTML,
+	"picker":  pickerHTML + layoutHTML + foldersListHTML,
+	"confirm": confirmHTML + layoutHTML + foldersListHTML,
+	"error":   errorHTML + layoutHTML + foldersListHTML,
 }
 
 // layoutHTML is the page chrome shared by every page: the stylesheet and
@@ -120,6 +121,31 @@ button.ghost:hover { background: color-mix(in oklch, var(--destructive) 10%, tra
 .actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: 1rem; }
 
 .path { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem; color: var(--muted-foreground); overflow-wrap: anywhere; margin-bottom: .5rem; }
+
+.pathbox { display: flex; gap: .5rem; margin-bottom: .4rem; }
+.pathbox input { flex: 1; min-width: 0; font: inherit; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem; height: 2.25rem; padding: 0 .6rem; border-radius: var(--radius); border: 1px solid var(--border); background: var(--background); color: var(--foreground); }
+.pathbox input::placeholder { color: var(--muted-foreground); }
+.pathbox button { height: 2.25rem; }
+.pathbox input:focus-visible { outline: 2px solid var(--brand); outline-offset: -1px; border-color: transparent; }
+.hint { color: var(--muted-foreground); font-size: .8rem; margin: 0; }
+
+.crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: .15rem .4rem; font-size: .875rem; margin-bottom: .75rem; }
+.crumbs .sep { color: var(--muted-foreground); }
+.crumbs .here { font-weight: 500; }
+
+.notice { border-radius: var(--radius); padding: .5rem .75rem; margin: 0 0 1rem; font-size: .875rem; background: var(--muted); }
+.notice.error { background: color-mix(in oklch, var(--destructive) 10%, transparent); color: var(--destructive); }
+
+.chips { display: flex; flex-wrap: wrap; gap: .5rem; }
+.chip { display: inline-flex; align-items: center; padding: .35rem .75rem; border-radius: 999px; box-shadow: 0 0 0 1px var(--ring-card); color: var(--foreground); font-size: .875rem; }
+.chip:hover { background: var(--muted); text-decoration: none; }
+
+.places { display: grid; grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr)); gap: .5rem; }
+.place { display: flex; flex-direction: column; gap: .1rem; padding: .6rem .75rem; border-radius: var(--radius); box-shadow: 0 0 0 1px var(--ring-card); color: var(--foreground); }
+.place:hover { background: var(--muted); text-decoration: none; }
+.place .label { font-weight: 500; overflow-wrap: anywhere; }
+.this-folder { align-items: center; flex-wrap: wrap; }
+.this-folder .row-main { gap: .1rem; }
 </style>
 {{end}}
 
@@ -202,7 +228,12 @@ const homeHTML = `<!doctype html>
 </html>
 `
 
-const browseHTML = `<!doctype html>
+// pickerHTML is the folder chooser. It opens on the roots screen — the
+// drives and the handful of folders most people mean — because opening in
+// the home folder, as it used to, left a folder on another drive with no way
+// to be reached: walking up stopped at the top of C:. The path box above it
+// is the second way in, for a path pasted straight out of Explorer.
+const pickerHTML = `<!doctype html>
 <html lang="en">
 <head>
 {{template "head"}}
@@ -212,13 +243,43 @@ const browseHTML = `<!doctype html>
 {{template "header" .}}
 <main>
 <h1>Choose a folder</h1>
-<p class="lead">Pick a folder to sync with gate4.ai.</p>
-
-{{template "folders-list" .}}
+<p class="lead">Paste the path to a folder, or find it below.</p>
 
 <section class="card">
-  <p class="path">{{.Path}}</p>
-  {{if .Parent}}<div class="row"><a class="name" href="/browse?path={{.Parent}}">.. (up)</a></div>{{end}}
+  <form class="pathbox" method="get" action="/browse">
+    <input type="text" name="path" value="{{.Input}}" placeholder="{{.Placeholder}}" aria-label="Path to a folder" spellcheck="false" autocapitalize="off"{{if not .Dir}} autofocus{{end}}>
+    <button type="submit">Open</button>
+  </form>
+  <p class="hint">{{.PasteHint}}</p>
+</section>
+
+{{if .Problem}}<p class="notice{{if .ProblemIsError}} error{{end}}">{{.Problem}}</p>{{end}}
+
+{{if .Dir}}
+<nav class="crumbs" aria-label="Location">
+{{- range $i, $c := .Crumbs}}
+  {{- if $i}}<span class="sep">&rsaquo;</span>{{end}}
+  {{- if not $c.Path}}<a href="/browse">{{$c.Name}}</a>
+  {{- else if eq $c.Path $.Dir}}<span class="here">{{$c.Name}}</span>
+  {{- else}}<a href="/browse?path={{$c.Path}}">{{$c.Name}}</a>{{end}}
+{{- end}}
+</nav>
+
+<section class="card">
+  <div class="row this-folder">
+    <div class="row-main">
+      <span class="name">{{.DirName}}</span>
+      <span class="status">{{.Dir}}</span>
+    </div>
+    {{if .AlreadySynced}}
+    <span class="badge ok tag">Already syncing</span>
+    {{else}}
+    <form method="post" action="/folders">
+      <input type="hidden" name="path" value="{{.Dir}}">
+      <button class="lg" type="submit">Sync this folder</button>
+    </form>
+    {{end}}
+  </div>
   {{range .Entries}}
   <div class="row entry">
     <a class="name" href="/browse?path={{.Path}}">{{.Name}}/</a>
@@ -227,7 +288,7 @@ const browseHTML = `<!doctype html>
     {{else}}
     <form method="post" action="/folders">
       <input type="hidden" name="path" value="{{.Path}}">
-      <button type="submit">Sync</button>
+      <button class="outline" type="submit">Sync</button>
     </form>
     {{end}}
   </div>
@@ -235,8 +296,62 @@ const browseHTML = `<!doctype html>
   <p class="muted">No subfolders here.</p>
   {{end}}
 </section>
+{{else}}
+{{if .QuickAccess}}
+<section class="card">
+  <div class="card-head"><h2>Quick access</h2></div>
+  <div class="chips">
+    {{range .QuickAccess}}<a class="chip" href="/browse?path={{.Path}}">{{.Name}}</a>{{end}}
+  </div>
+</section>
+{{end}}
+<section class="card">
+  <div class="card-head"><h2>{{.VolumesHeading}}</h2></div>
+  <div class="places">
+    {{range .Volumes}}
+    <a class="place" href="/browse?path={{.Path}}">
+      <span class="label">{{.Name}}{{if .Label}} &middot; {{.Label}}{{end}}</span>
+      {{if .Detail}}<span class="status">{{.Detail}}</span>{{end}}
+    </a>
+    {{else}}
+    <p class="muted">No drives found.</p>
+    {{end}}
+  </div>
+</section>
+{{end}}
+
+{{template "folders-list" .}}
 
 <p class="actions"><a class="btn outline" href="/">Cancel</a></p>
+</main>
+</body>
+</html>
+`
+
+// confirmHTML asks before a choice that is broad enough to be a mis-click —
+// a whole drive, a home folder, a system folder, or one that overlaps a
+// folder already being synced. It asks rather than refuses: every one of
+// those is a legitimate thing to want, just not by accident.
+const confirmHTML = `<!doctype html>
+<html lang="en">
+<head>
+{{template "head"}}
+<title>{{.Title}} — gate4.ai Sync Client</title>
+</head>
+<body>
+{{template "header" .}}
+<main>
+<h1 class="alert">{{template "alert-icon"}}{{.Title}}</h1>
+<p class="lead">{{.Message}}</p>
+<p class="path">{{.Path}}</p>
+<div class="actions">
+  <form method="post" action="/folders">
+    <input type="hidden" name="path" value="{{.Path}}">
+    <input type="hidden" name="confirmed" value="1">
+    <button class="lg" type="submit">{{.Action}}</button>
+  </form>
+  <a class="btn outline lg" href="{{.Back}}">Choose another folder</a>
+</div>
 </main>
 </body>
 </html>

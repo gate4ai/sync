@@ -69,10 +69,20 @@ server.
 2. Clicking it opens a local settings page in the browser (`http://127.0.0.1:<port>/`) — the
    client has no GUI of its own, all configuration happens through the browser.
 3. There you pick local folders to sync (a plain HTML picker over `os.ReadDir`, no native
-   dialogs) and press "Sync" next to one — on an unlinked client this goes straight on to
+   dialogs) and press "Sync" — on an unlinked client this goes straight on to
    `https://gate4.ai/link?client=<id>`, where the installation gets attached to the
    account's vault. No separate "Connect" click is needed; the "Connect to gate4.ai"
    button on the home page stays only for coming back to an unfinished pairing.
+
+   The picker opens on a "This PC" screen listing the drives and the folders most people
+   mean, because without it a folder on a second drive could not be reached at all: it used
+   to open in the home folder, and walking up from there stops at the top of `C:`. Above
+   the listing is a box for a path pasted straight out of Explorer or Finder —
+   `internal/localpath` unwraps the quotes "Copy as path" adds, `file://` URLs,
+   `%USERPROFILE%` and `~`, opens the folder holding a path that names a file, and falls
+   back to the closest folder above one that does not exist. A choice broad enough to be a
+   mis-click — a whole drive, a home or system folder, or one overlapping a folder already
+   synced — is confirmed first.
 4. Once linked, the client registers each selected folder with the server on its own, gets a
    WebDAV credential per folder, and starts periodic two-way sync.
 5. Allowed file types, the maximum file size and the poll interval are set in the cabinet on

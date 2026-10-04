@@ -190,6 +190,14 @@ func TestAddFolderThenHomeListsIt(t *testing.T) {
 	}
 }
 
+// containsFold is Contains ignoring case, for assertions on a rendered URL:
+// html/template writes its percent escapes in lower case and url.QueryEscape
+// in upper, and the temp paths here have upper-case letters of their own that
+// cannot simply be folded away.
+func containsFold(haystack, needle string) bool {
+	return strings.Contains(strings.ToLower(haystack), strings.ToLower(needle))
+}
+
 func noRedirectClient() *http.Client {
 	return &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 }
@@ -343,8 +351,11 @@ func TestBrowseListsSubdirectoriesOnly(t *testing.T) {
 	if !strings.Contains(string(body), ">Sync<") {
 		t.Errorf("browse page is missing a per-row Sync button:\n%s", body)
 	}
-	if strings.Contains(string(body), "Sync this folder") {
-		t.Error("browse page still has the old whole-folder Sync button")
+	// The button for the folder that is open is what makes a pasted path
+	// usable: a pasted path lands you inside the folder you meant, so
+	// per-row buttons alone would leave nothing to press.
+	if !strings.Contains(string(body), "Sync this folder") {
+		t.Error("browse page has no button for the folder that is open")
 	}
 	if !strings.Contains(string(body), `>Cancel<`) {
 		t.Error("browse page is missing a Cancel action")
@@ -467,5 +478,303 @@ func TestRemoveButtonIsDisabledForARegisteredFolderWhileNotLinked(t *testing.T) 
 	body, _ := io.ReadAll(resp.Body)
 	if !strings.Contains(string(body), `type="submit" disabled`) {
 		t.Errorf("Remove button is not disabled: %s", body)
+	}
+}
+
+// The picker opens on the roots screen rather than in the home folder. That
+// is the fix for the demo where a folder on D: could not be reached at all:
+// the home folder is on C:, and walking up from it stops at the top of C:.
+func TestPickerOpensOnTheRootsScreen(t *testing.T) {
+	f := newFixture(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.Mkdir(home+"/Documents", 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := http.Get(f.url("/browse"))
+	if err != nil {
+		t.Fatalf("GET /browse: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	b, _ := io.ReadAll(resp.Body)
+	body := string(b)
+
+	if !strings.Contains(body, "Volumes") {
+		t.Errorf("roots screen does not list the volumes:\n%s", body)
+	}
+	if !containsFold(body, `href="/browse?path=%2F"`) {
+		t.Errorf("roots screen has no link to the root volume:\n%s", body)
+	}
+	if !strings.Contains(body, "Quick access") || !strings.Contains(body, ">Documents<") {
+		t.Errorf("roots screen is missing the quick-access folders:\n%s", body)
+	}
+	if !strings.Contains(body, "Paste the full path") {
+		t.Errorf("roots screen does not say how to paste a path:\n%s", body)
+	}
+	if !strings.Contains(body, `name="path"`) {
+		t.Errorf("roots screen has no box to paste a path into:\n%s", body)
+	}
+}
+
+// Explorer's "Copy as path" wraps the path in quotes, which is what Sergey
+// pasted. Both ways in have to accept it: the path box and the form that adds
+// the folder.
+func TestPastedPathWithQuotesIsAccepted(t *testing.T) {
+	f := newFixture(t)
+	dir := t.TempDir()
+
+	resp, err := http.Get(f.url("/browse?path=" + url.QueryEscape(`"`+dir+`"`)))
+	if err != nil {
+		t.Fatalf("GET /browse: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	b, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(b), `name="path" value="`+dir+`"`) {
+		t.Errorf("quoted path did not open the folder:\n%s", b)
+	}
+
+	add, err := http.PostForm(f.url("/folders"), map[string][]string{"path": {`"` + dir + `"`}})
+	if err != nil {
+		t.Fatalf("POST /folders: %v", err)
+	}
+	_ = add.Body.Close()
+	if len(f.cfg.Folders) != 1 || f.cfg.Folders[0].Path != dir {
+		t.Errorf("Folders = %+v, want one entry for %q", f.cfg.Folders, dir)
+	}
+}
+
+// Pasting the path of a file is a normal way to say "that folder" — it is
+// what Explorer gives you when a document is selected.
+func TestPastingAFilePathOpensTheFolderHoldingIt(t *testing.T) {
+	f := newFixture(t)
+	dir := t.TempDir()
+	file := dir + "/estimate.xlsx"
+	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := http.Get(f.url("/browse?path=" + url.QueryEscape(file)))
+	if err != nil {
+		t.Fatalf("GET /browse: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	b, _ := io.ReadAll(resp.Body)
+	body := string(b)
+
+	if !strings.Contains(body, "is a file — showing the folder it is in") {
+		t.Errorf("no explanation of where the listing came from:\n%s", body)
+	}
+	if !strings.Contains(body, `name="path" value="`+dir+`"`) {
+		t.Errorf("the folder holding the file was not offered for syncing:\n%s", body)
+	}
+}
+
+// A typo in a pasted path must not be a dead end: the closest folder above it
+// opens, and what was typed stays in the box to be corrected.
+func TestPastingAMissingPathShowsTheClosestFolderAbove(t *testing.T) {
+	f := newFixture(t)
+	dir := t.TempDir()
+	typo := dir + "/Rabta/Proekt"
+
+	resp, err := http.Get(f.url("/browse?path=" + url.QueryEscape(typo)))
+	if err != nil {
+		t.Fatalf("GET /browse: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	b, _ := io.ReadAll(resp.Body)
+	body := string(b)
+
+	if !strings.Contains(body, "There is no folder at "+typo) {
+		t.Errorf("the missing path is not named back:\n%s", body)
+	}
+	if !strings.Contains(body, `class="notice error"`) {
+		t.Errorf("the missing path is not shown as a problem:\n%s", body)
+	}
+	if !strings.Contains(body, `value="`+typo+`"`) {
+		t.Errorf("what was typed was dropped from the box:\n%s", body)
+	}
+	if !strings.Contains(body, `value="`+dir+`">`) {
+		t.Errorf("the closest folder above was not opened:\n%s", body)
+	}
+}
+
+// Every step of the trail is a link, so coming back up five levels is one
+// click rather than five presses of "..".
+func TestBrowseLinksEveryStepOfTheTrail(t *testing.T) {
+	f := newFixture(t)
+	dir := t.TempDir()
+	deep := dir + "/a/b"
+	if err := os.MkdirAll(deep, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := http.Get(f.url("/browse?path=" + url.QueryEscape(deep)))
+	if err != nil {
+		t.Fatalf("GET /browse: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	b, _ := io.ReadAll(resp.Body)
+	body := string(b)
+
+	if !containsFold(body, `href="/browse?path=`+url.QueryEscape(dir+"/a")+`"`) {
+		t.Errorf("the parent is not a link in the trail:\n%s", body)
+	}
+	if !strings.Contains(body, `href="/browse"`) {
+		t.Errorf("the trail does not lead back to the roots screen:\n%s", body)
+	}
+	if !strings.Contains(body, `<span class="here">b</span>`) {
+		t.Errorf("the folder that is open is not the last step of the trail:\n%s", body)
+	}
+}
+
+// Syncing a whole volume is legitimate but almost never what a single click
+// meant, so it is a question first.
+func TestSyncingAWholeVolumeAsksFirst(t *testing.T) {
+	f := newFixture(t)
+
+	resp, err := http.PostForm(f.url("/folders"), map[string][]string{"path": {"/"}})
+	if err != nil {
+		t.Fatalf("POST /folders: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	b, _ := io.ReadAll(resp.Body)
+
+	if !strings.Contains(string(b), "Sync the whole of /?") {
+		t.Errorf("no confirmation was asked for:\n%s", b)
+	}
+	if !strings.Contains(string(b), `name="confirmed" value="1"`) {
+		t.Errorf("the confirmation has no way to go ahead:\n%s", b)
+	}
+	if len(f.cfg.Folders) != 0 {
+		t.Errorf("the volume was added without an answer: %+v", f.cfg.Folders)
+	}
+}
+
+func TestConfirmedBroadFolderIsAdded(t *testing.T) {
+	f := newFixture(t)
+
+	resp, err := http.PostForm(f.url("/folders"), map[string][]string{"path": {"/"}, "confirmed": {"1"}})
+	if err != nil {
+		t.Fatalf("POST /folders: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	if len(f.cfg.Folders) != 1 || f.cfg.Folders[0].Path != "/" {
+		t.Errorf("Folders = %+v, want the confirmed folder added", f.cfg.Folders)
+	}
+}
+
+func TestSyncingTheHomeFolderAsksFirst(t *testing.T) {
+	f := newFixture(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	resp, err := http.PostForm(f.url("/folders"), map[string][]string{"path": {home}})
+	if err != nil {
+		t.Fatalf("POST /folders: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	b, _ := io.ReadAll(resp.Body)
+
+	if !strings.Contains(string(b), "Sync your whole home folder?") {
+		t.Errorf("no confirmation for the home folder:\n%s", b)
+	}
+	if len(f.cfg.Folders) != 0 {
+		t.Errorf("the home folder was added without an answer: %+v", f.cfg.Folders)
+	}
+}
+
+// Two mounts over the same files is the mistake here, so overlapping a folder
+// that is already synced is a question too — in both directions.
+func TestSyncingAFolderThatOverlapsASyncedOneAsksFirst(t *testing.T) {
+	dir := t.TempDir()
+	inner := dir + "/clients"
+	if err := os.Mkdir(inner, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("holds a synced folder", func(t *testing.T) {
+		f := newFixture(t)
+		f.cfg.Folders = []config.Folder{{ID: "f1", Path: inner}}
+
+		resp, err := http.PostForm(f.url("/folders"), map[string][]string{"path": {dir}})
+		if err != nil {
+			t.Fatalf("POST /folders: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		b, _ := io.ReadAll(resp.Body)
+		if !strings.Contains(string(b), "A folder inside this one is already synced") {
+			t.Errorf("no confirmation:\n%s", b)
+		}
+		if !strings.Contains(string(b), inner) {
+			t.Errorf("the confirmation does not name the folder it clashes with:\n%s", b)
+		}
+		if len(f.cfg.Folders) != 1 {
+			t.Errorf("Folders = %+v, want only the one that was there", f.cfg.Folders)
+		}
+	})
+
+	t.Run("sits inside a synced folder", func(t *testing.T) {
+		f := newFixture(t)
+		f.cfg.Folders = []config.Folder{{ID: "f1", Path: dir}}
+
+		resp, err := http.PostForm(f.url("/folders"), map[string][]string{"path": {inner}})
+		if err != nil {
+			t.Fatalf("POST /folders: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		b, _ := io.ReadAll(resp.Body)
+		if !strings.Contains(string(b), "This folder is inside one that is already synced") {
+			t.Errorf("no confirmation:\n%s", b)
+		}
+		if len(f.cfg.Folders) != 1 {
+			t.Errorf("Folders = %+v, want only the one that was there", f.cfg.Folders)
+		}
+	})
+}
+
+// An ordinary folder is added with no question at all: the confirmations are
+// there for the broad choices, not as a toll on every one.
+func TestAnOrdinaryFolderIsAddedWithoutAQuestion(t *testing.T) {
+	f := newFixture(t)
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir() + "/project"
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := noRedirectClient().PostForm(f.url("/folders"), map[string][]string{"path": {dir}})
+	if err != nil {
+		t.Fatalf("POST /folders: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Errorf("status = %d, want a redirect rather than a question", resp.StatusCode)
+	}
+	if len(f.cfg.Folders) != 1 {
+		t.Errorf("Folders = %+v, want the folder added straight away", f.cfg.Folders)
+	}
+}
+
+// The folder that is open is shown with its status instead of a button when it
+// is already configured, the same as any subfolder in the listing.
+func TestBrowseMarksTheOpenFolderWhenItIsAlreadySynced(t *testing.T) {
+	f := newFixture(t)
+	dir := t.TempDir()
+	f.cfg.Folders = []config.Folder{{ID: "f1", Path: dir}}
+
+	resp, err := http.Get(f.url("/browse?path=" + url.QueryEscape(dir)))
+	if err != nil {
+		t.Fatalf("GET /browse: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	b, _ := io.ReadAll(resp.Body)
+	if strings.Contains(string(b), "Sync this folder") {
+		t.Errorf("an already-synced folder was offered again:\n%s", b)
+	}
+	if !strings.Contains(string(b), "Already syncing") {
+		t.Errorf("the open folder is not marked as synced:\n%s", b)
 	}
 }
