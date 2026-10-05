@@ -2,6 +2,7 @@ package localpath
 
 import (
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -52,6 +53,13 @@ func TestVolumesAndQuickAccessAreUsable(t *testing.T) {
 func TestVolumesFindsTheOneMountedForThisRun(t *testing.T) {
 	want := os.Getenv("GATE4AI_TEST_VOLUME")
 	if want == "" {
+		// A test that skips itself looks exactly like one that passed, and
+		// `go test` without -v prints neither. CI mounts a volume on the two
+		// platforms that can, so a missing one there means the step that
+		// mounts it broke — which must be a failure, not a quiet skip.
+		if os.Getenv("CI") != "" && (runtime.GOOS == "windows" || runtime.GOOS == "darwin") {
+			t.Fatal("no volume was mounted for this run: see the workflow step that mounts one")
+		}
 		t.Skip("no test volume mounted for this run")
 	}
 	wantLabel := os.Getenv("GATE4AI_TEST_VOLUME_LABEL")
