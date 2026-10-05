@@ -1,31 +1,21 @@
 package autostart
 
-// A per-user LaunchAgent: a plist in ~/Library/LaunchAgents/, loaded with
-// launchctl. No CGO — launchd is driven entirely through that one
-// command-line tool, the same way a person would set this up by hand.
+// A per-user LaunchAgent: a plist in ~/Library/LaunchAgents/, which launchd
+// reads at every login. No CGO and no launchctl either — the file on disk is
+// the whole registration, the same way a person would set this up by hand.
+//
+// launchctl is deliberately not run. "launchctl load" on a plist with
+// RunAtLoad starts the job right away: called from the app's own startup,
+// that launched a second copy next to the one already running. And
+// "launchctl unload" stops the job's process, which after a login is this
+// very app. Neither change needs to take effect before the next login: the
+// app is already running, and it quits when asked.
 
 import (
-	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"time"
 )
-
-// launchctlTimeout bounds the one external command this package runs. It is
-// called while the settings page waits for a reply, so a launchctl that never
-// returns would hang the page rather than just this setting.
-const launchctlTimeout = 10 * time.Second
-
-// launchctl runs one best-effort launchctl command. Failures are deliberately
-// ignored: the plist on disk is what makes autostart work at the next login,
-// and loading it now is only so the change takes effect without one.
-func launchctl(args ...string) {
-	ctx, cancel := context.WithTimeout(context.Background(), launchctlTimeout)
-	defer cancel()
-	_ = exec.CommandContext(ctx, "launchctl", args...).Run()
-}
 
 const label = "ai.gate4.sync"
 
@@ -64,11 +54,7 @@ func enable() error {
 </dict>
 </plist>
 `, label, exe)
-	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
-		return err
-	}
-	launchctl("load", p)
-	return nil
+	return os.WriteFile(p, []byte(content), 0o644)
 }
 
 func disable() error {
@@ -76,7 +62,6 @@ func disable() error {
 	if err != nil {
 		return err
 	}
-	launchctl("unload", p)
 	err = os.Remove(p)
 	if os.IsNotExist(err) {
 		return nil
