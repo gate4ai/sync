@@ -9,6 +9,8 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -188,6 +190,24 @@ func TestAddFolderThenHomeListsIt(t *testing.T) {
 	if !strings.Contains(string(body), dir) {
 		t.Errorf("home page does not list the added folder:\n%s", body)
 	}
+}
+
+// setHome points os.UserHomeDir at dir on every platform: it reads $HOME on
+// Unix and %USERPROFILE% on Windows.
+func setHome(t *testing.T, dir string) {
+	t.Helper()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+}
+
+// volumeRoot is the top of the volume a path sits on — "C:\\" on Windows, "/"
+// elsewhere. The tests that need a whole volume use the one the temp folder is
+// already on, rather than naming a drive that may not exist on the runner.
+func volumeRoot(path string) string {
+	if vol := filepath.VolumeName(path); vol != "" {
+		return vol + string(filepath.Separator)
+	}
+	return string(filepath.Separator)
 }
 
 // containsFold is Contains ignoring case, for assertions on a rendered URL:
@@ -487,10 +507,7 @@ func TestRemoveButtonIsDisabledForARegisteredFolderWhileNotLinked(t *testing.T) 
 func TestPickerOpensOnTheRootsScreen(t *testing.T) {
 	f := newFixture(t)
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	if err := os.Mkdir(home+"/Documents", 0o700); err != nil {
-		t.Fatal(err)
-	}
+	setHome(t, home)
 
 	resp, err := http.Get(f.url("/browse"))
 	if err != nil {
@@ -500,17 +517,26 @@ func TestPickerOpensOnTheRootsScreen(t *testing.T) {
 	b, _ := io.ReadAll(resp.Body)
 	body := string(b)
 
-	if !strings.Contains(body, "Volumes") {
-		t.Errorf("roots screen does not list the volumes:\n%s", body)
+	// Each platform names these after its own file manager, and the paste hint
+	// is only useful if it names that platform's own shortcut.
+	heading, hint := "Volumes", "Paste the full path"
+	switch runtime.GOOS {
+	case "windows":
+		heading, hint = "Drives", "Copy as path"
+	case "darwin":
+		hint = "Option-Command-C"
 	}
-	if !containsFold(body, `href="/browse?path=%2F"`) {
-		t.Errorf("roots screen has no link to the root volume:\n%s", body)
+	if !strings.Contains(body, heading) {
+		t.Errorf("roots screen does not list the volumes under %q:\n%s", heading, body)
 	}
-	if !strings.Contains(body, "Quick access") || !strings.Contains(body, ">Documents<") {
-		t.Errorf("roots screen is missing the quick-access folders:\n%s", body)
+	if !strings.Contains(body, hint) {
+		t.Errorf("roots screen does not say how to copy a path on this platform:\n%s", body)
 	}
-	if !strings.Contains(body, "Paste the full path") {
-		t.Errorf("roots screen does not say how to paste a path:\n%s", body)
+	if !containsFold(body, `href="/browse?path=`+url.QueryEscape(volumeRoot(home))+`"`) {
+		t.Errorf("roots screen has no link to the volume this machine runs from:\n%s", body)
+	}
+	if !strings.Contains(body, "Quick access") || !strings.Contains(body, ">"+filepath.Base(home)+"<") {
+		t.Errorf("roots screen is missing the home folder in quick access:\n%s", body)
 	}
 	if !strings.Contains(body, `name="path"`) {
 		t.Errorf("roots screen has no box to paste a path into:\n%s", body)
@@ -549,7 +575,7 @@ func TestPastedPathWithQuotesIsAccepted(t *testing.T) {
 func TestPastingAFilePathOpensTheFolderHoldingIt(t *testing.T) {
 	f := newFixture(t)
 	dir := t.TempDir()
-	file := dir + "/estimate.xlsx"
+	file := filepath.Join(dir, "estimate.xlsx")
 	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -575,7 +601,7 @@ func TestPastingAFilePathOpensTheFolderHoldingIt(t *testing.T) {
 func TestPastingAMissingPathShowsTheClosestFolderAbove(t *testing.T) {
 	f := newFixture(t)
 	dir := t.TempDir()
-	typo := dir + "/Rabta/Proekt"
+	typo := filepath.Join(dir, "Rabta", "Proekt")
 
 	resp, err := http.Get(f.url("/browse?path=" + url.QueryEscape(typo)))
 	if err != nil {
@@ -604,7 +630,7 @@ func TestPastingAMissingPathShowsTheClosestFolderAbove(t *testing.T) {
 func TestBrowseLinksEveryStepOfTheTrail(t *testing.T) {
 	f := newFixture(t)
 	dir := t.TempDir()
-	deep := dir + "/a/b"
+	deep := filepath.Join(dir, "a", "b")
 	if err := os.MkdirAll(deep, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -617,7 +643,7 @@ func TestBrowseLinksEveryStepOfTheTrail(t *testing.T) {
 	b, _ := io.ReadAll(resp.Body)
 	body := string(b)
 
-	if !containsFold(body, `href="/browse?path=`+url.QueryEscape(dir+"/a")+`"`) {
+	if !containsFold(body, `href="/browse?path=`+url.QueryEscape(filepath.Join(dir, "a"))+`"`) {
 		t.Errorf("the parent is not a link in the trail:\n%s", body)
 	}
 	if !strings.Contains(body, `href="/browse"`) {
@@ -632,15 +658,16 @@ func TestBrowseLinksEveryStepOfTheTrail(t *testing.T) {
 // meant, so it is a question first.
 func TestSyncingAWholeVolumeAsksFirst(t *testing.T) {
 	f := newFixture(t)
+	root := volumeRoot(t.TempDir())
 
-	resp, err := http.PostForm(f.url("/folders"), map[string][]string{"path": {"/"}})
+	resp, err := http.PostForm(f.url("/folders"), map[string][]string{"path": {root}})
 	if err != nil {
 		t.Fatalf("POST /folders: %v", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	b, _ := io.ReadAll(resp.Body)
 
-	if !strings.Contains(string(b), "Sync the whole of /?") {
+	if !strings.Contains(string(b), "Sync the whole of "+root+"?") {
 		t.Errorf("no confirmation was asked for:\n%s", b)
 	}
 	if !strings.Contains(string(b), `name="confirmed" value="1"`) {
@@ -653,14 +680,15 @@ func TestSyncingAWholeVolumeAsksFirst(t *testing.T) {
 
 func TestConfirmedBroadFolderIsAdded(t *testing.T) {
 	f := newFixture(t)
+	root := volumeRoot(t.TempDir())
 
-	resp, err := http.PostForm(f.url("/folders"), map[string][]string{"path": {"/"}, "confirmed": {"1"}})
+	resp, err := http.PostForm(f.url("/folders"), map[string][]string{"path": {root}, "confirmed": {"1"}})
 	if err != nil {
 		t.Fatalf("POST /folders: %v", err)
 	}
 	_ = resp.Body.Close()
 
-	if len(f.cfg.Folders) != 1 || f.cfg.Folders[0].Path != "/" {
+	if len(f.cfg.Folders) != 1 || f.cfg.Folders[0].Path != root {
 		t.Errorf("Folders = %+v, want the confirmed folder added", f.cfg.Folders)
 	}
 }
@@ -668,7 +696,7 @@ func TestConfirmedBroadFolderIsAdded(t *testing.T) {
 func TestSyncingTheHomeFolderAsksFirst(t *testing.T) {
 	f := newFixture(t)
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 
 	resp, err := http.PostForm(f.url("/folders"), map[string][]string{"path": {home}})
 	if err != nil {
@@ -689,7 +717,7 @@ func TestSyncingTheHomeFolderAsksFirst(t *testing.T) {
 // that is already synced is a question too — in both directions.
 func TestSyncingAFolderThatOverlapsASyncedOneAsksFirst(t *testing.T) {
 	dir := t.TempDir()
-	inner := dir + "/clients"
+	inner := filepath.Join(dir, "clients")
 	if err := os.Mkdir(inner, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -738,8 +766,8 @@ func TestSyncingAFolderThatOverlapsASyncedOneAsksFirst(t *testing.T) {
 // there for the broad choices, not as a toll on every one.
 func TestAnOrdinaryFolderIsAddedWithoutAQuestion(t *testing.T) {
 	f := newFixture(t)
-	t.Setenv("HOME", t.TempDir())
-	dir := t.TempDir() + "/project"
+	setHome(t, t.TempDir())
+	dir := filepath.Join(t.TempDir(), "project")
 	if err := os.Mkdir(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}

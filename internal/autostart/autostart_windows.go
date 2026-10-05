@@ -6,6 +6,7 @@ package autostart
 // a transitive dependency of the tray library.
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -24,7 +25,7 @@ func enable() error {
 	if err != nil {
 		return fmt.Errorf("open Run key: %w", err)
 	}
-	defer k.Close()
+	defer func() { _ = k.Close() }()
 	return k.SetStringValue(valueName, exe)
 }
 
@@ -34,9 +35,9 @@ func disable() error {
 	if err != nil {
 		return fmt.Errorf("open Run key: %w", err)
 	}
-	defer k.Close()
+	defer func() { _ = k.Close() }()
 	err = k.DeleteValue(valueName)
-	if err == registry.ErrNotExist {
+	if errors.Is(err, registry.ErrNotExist) {
 		return nil
 	}
 	return err
@@ -48,9 +49,9 @@ func isEnabled() (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("open Run key: %w", err)
 	}
-	defer k.Close()
+	defer func() { _ = k.Close() }()
 	_, _, err = k.GetStringValue(valueName)
-	if err == registry.ErrNotExist {
+	if errors.Is(err, registry.ErrNotExist) {
 		return false, nil
 	}
 	if err != nil {

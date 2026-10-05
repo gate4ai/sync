@@ -35,7 +35,15 @@ jobs:
           if [ -n "$unformatted" ]; then
             echo "not gofmt-clean:"; echo "$unformatted"; exit 1
           fi
-      - run: go vet ./...
+      # Every target, not just this runner's: go vet only ever typechecks the
+      # files for one GOOS, and the Windows and macOS halves of
+      # internal/localpath and internal/autostart are exactly where a mistake
+      # would otherwise reach a release unseen.
+      - name: go vet, for every target
+        run: |
+          for os in linux windows darwin; do
+            CGO_ENABLED=0 GOOS=$os go vet ./... || exit 1
+          done
       - name: go mod tidy is a no-op
         run: |
           go mod tidy -diff || {
@@ -45,17 +53,86 @@ jobs:
         with:
           version: v2.13.2
 
-  test:
+  # The linter, like the compiler, sees only one platform's files at a time, so
+  # everything behind a _windows.go or _darwin.go name went unchecked until this
+  # job existed — it found real unchecked errors and a bare == on an error in
+  # internal/autostart. Cross-linting needs no extra runner: only GOOS changes.
+  lint-cross:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: [windows, darwin]
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-go@v7.0.0
         with:
           go-version: ${{ env.GO_VERSION }}
+      - uses: golangci/golangci-lint-action@v9.3.0
+        with:
+          version: v2.13.2
+        env:
+          GOOS: ${{ matrix.goos }}
+          CGO_ENABLED: "0"
+
+  test:
+    strategy:
+      # One platform's failure must not cancel the others: which platforms
+      # fail is most of the information when a path or a syscall is at fault.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      # internal/localpath reads the real list of drives from the OS, which is
+      # the one thing no amount of unit testing can stand in for — a folder on
+      # a second drive being unreachable is the bug that list exists to fix.
+      # So each platform that can mounts a volume whose letter, name and label
+      # this run picked in advance, and the test checks the list against it.
+      # Linux is left out on purpose: the same unix code runs on macOS, and a
+      # loop device would need privileges this job should not want.
+      - name: mount a volume to recognise (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vhd = Join-Path $env:RUNNER_TEMP 'gate4ai-test.vhdx'
+          $script = Join-Path $env:RUNNER_TEMP 'gate4ai-test-diskpart.txt'
+          # A script file rather than a here-string piped to diskpart: a
+          # here-string's closing "@ has to start the line, which YAML's own
+          # indentation would break.
+          Set-Content -Path $script -Value @(
+            "create vdisk file=`"$vhd`" maximum=256 type=expandable",
+            "attach vdisk",
+            "create partition primary",
+            "assign letter=X"
+          )
+          diskpart /s $script
+          Format-Volume -DriveLetter X -FileSystem NTFS -NewFileSystemLabel GATE4AITEST -Confirm:$false -Force
+          if (-not (Test-Path 'X:\')) { throw 'X: was not mounted' }
+          Add-Content -Path $env:GITHUB_ENV -Value 'GATE4AI_TEST_VOLUME=X:'
+          Add-Content -Path $env:GITHUB_ENV -Value 'GATE4AI_TEST_VOLUME_LABEL=GATE4AITEST'
+
+      - name: mount a volume to recognise (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          image="$RUNNER_TEMP/gate4ai-test.dmg"
+          hdiutil create -size 64m -fs HFS+ -volname GATE4AITEST "$image"
+          hdiutil attach "$image"
+          test -d /Volumes/GATE4AITEST || { echo "the volume did not mount"; exit 1; }
+          echo "GATE4AI_TEST_VOLUME=GATE4AITEST" >> "$GITHUB_ENV"
+
       # CGO_ENABLED=0 here too: a test suite that only passes with cgo
       # would not catch a regression the whole point of this client is
-      # to avoid — see CLAUDE.md.
-      - run: CGO_ENABLED=0 go test ./...
+      # to avoid — see CLAUDE.md. Set as an environment variable rather than
+      # inline, since the Windows runner's default shell is PowerShell.
+      - run: go test ./...
+        env:
+          CGO_ENABLED: "0"
 
   # No CGO on any target, by design (issue #38: "a pure Go application,
   # no CGO"). Building here for all three with CGO_ENABLED=0 is the actual
@@ -66,7 +143,7 @@ jobs:
   # release.yml instead) and every PR, so a tester can open the finished
   # run and grab a binary from its artifacts without waiting for a release.
   build-artifacts:
-    needs: [lint, test]
+    needs: [lint, lint-cross, test]
     strategy:
       matrix:
         goos: [linux, windows, darwin]

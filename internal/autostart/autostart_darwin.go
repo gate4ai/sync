@@ -5,11 +5,27 @@ package autostart
 // command-line tool, the same way a person would set this up by hand.
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 )
+
+// launchctlTimeout bounds the one external command this package runs. It is
+// called while the settings page waits for a reply, so a launchctl that never
+// returns would hang the page rather than just this setting.
+const launchctlTimeout = 10 * time.Second
+
+// launchctl runs one best-effort launchctl command. Failures are deliberately
+// ignored: the plist on disk is what makes autostart work at the next login,
+// and loading it now is only so the change takes effect without one.
+func launchctl(args ...string) {
+	ctx, cancel := context.WithTimeout(context.Background(), launchctlTimeout)
+	defer cancel()
+	_ = exec.CommandContext(ctx, "launchctl", args...).Run()
+}
 
 const label = "ai.gate4.sync"
 
@@ -51,10 +67,7 @@ func enable() error {
 	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 		return err
 	}
-	// Best-effort: a plist written before the next login works anyway, and
-	// a failure here (e.g. launchd already has a stale copy loaded) should
-	// not stop the file from being in place for next time.
-	_ = exec.Command("launchctl", "load", p).Run()
+	launchctl("load", p)
 	return nil
 }
 
@@ -63,7 +76,7 @@ func disable() error {
 	if err != nil {
 		return err
 	}
-	_ = exec.Command("launchctl", "unload", p).Run()
+	launchctl("unload", p)
 	err = os.Remove(p)
 	if os.IsNotExist(err) {
 		return nil

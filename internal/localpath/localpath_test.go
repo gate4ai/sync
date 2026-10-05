@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -117,6 +118,9 @@ func TestResolveOfNothingIsEmpty(t *testing.T) {
 }
 
 func TestResolveOfAnUnreadableFolderStepsUp(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("permissions are ACLs here, which a mode of 0 does not touch")
+	}
 	if os.Geteuid() == 0 {
 		t.Skip("root reads every folder, so there is nothing to refuse")
 	}

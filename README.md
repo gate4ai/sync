@@ -123,6 +123,15 @@ go build ./cmd/gate4ai-sync
 No CGO on any of the three platforms — `CGO_ENABLED=0 GOOS={linux,windows,darwin} go build ./...`
 is checked in CI (`.github/workflows/ci.yml`).
 
+Tests run on Linux, Windows and macOS runners, and `go vet` and golangci-lint are run once
+per target from Linux. Platform code is otherwise only ever compiled, never checked: the
+cross-lint job found unchecked errors and a bare `==` on an error in `internal/autostart`
+the first time it ran. The Windows and macOS test jobs each mount a small volume with a
+letter, name and label chosen in advance (`diskpart` and `hdiutil`), so
+`internal/localpath`'s drive list — the thing that makes a folder on a second drive
+reachable at all — is checked against a volume whose answer is known, rather than only
+against "it did not crash".
+
 ### CI-built binaries and installers
 
 - Every push to a branch other than `main`, and every pull request, runs

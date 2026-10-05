@@ -117,9 +117,14 @@ func driveKind(kind uint32) string {
 // systemFolders are the folders holding Windows and the programs installed
 // on it. Syncing one is almost always a mis-click, and the picker says so
 // before it happens.
+//
+// Not AppData or LocalAppData: those hold the person's own data rather than
+// the system's, so the warning's wording would be wrong for them — and the
+// Windows temp folder lives under LocalAppData, which would put the question
+// in front of perfectly ordinary choices.
 func systemFolders() []string {
 	var out []string
-	for _, env := range []string{"SystemRoot", "ProgramFiles", "ProgramFiles(x86)", "ProgramData", "LOCALAPPDATA", "APPDATA"} {
+	for _, env := range []string{"SystemRoot", "ProgramFiles", "ProgramFiles(x86)", "ProgramData"} {
 		if v := os.Getenv(env); v != "" {
 			out = append(out, filepath.Clean(v))
 		}
