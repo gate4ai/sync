@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -392,7 +393,9 @@ func TestSyncOnceDownloadKeepsTheServersMtimeAndTheFilesMode(t *testing.T) {
 	if want := time.Unix(int64(len("a.md")), 0); !info.ModTime().Equal(want) {
 		t.Errorf("mtime = %v, want the server's %v", info.ModTime(), want)
 	}
-	if info.Mode().Perm() != 0o640 {
+	// Windows has no permission bits: Chmod only sets or clears read-only,
+	// and every writable file reads back as 0666 whatever was asked for.
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o640 {
 		t.Errorf("mode = %v, want 0640 kept from the replaced file", info.Mode().Perm())
 	}
 }
