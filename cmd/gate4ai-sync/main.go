@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/gate4ai/sync/internal/autostart"
 	"github.com/gate4ai/sync/internal/browser"
@@ -25,6 +26,9 @@ import (
 	"github.com/gate4ai/sync/internal/trayapp"
 	"github.com/gate4ai/sync/internal/webui"
 )
+
+// shutdownWait is how long quitting waits for the sync loop to stop.
+const shutdownWait = 3 * time.Second
 
 func main() {
 	log := logging.New(os.Stderr)
@@ -115,7 +119,24 @@ func run(log *slog.Logger) error {
 		}
 	}
 
-	go loop.Run(ctx, cfg, &mu, saveConfig, &st, wake, log)
+	loopDone := make(chan struct{})
+	go func() {
+		defer close(loopDone)
+		loop.Run(ctx, cfg, &mu, saveConfig, &st, wake, log)
+	}()
+	// shutdown cancels the loop and gives it a moment to return: the
+	// transfer in flight aborts, and the folder's manifest is saved with
+	// what was already done. Not waiting longer keeps quitting quick, and
+	// stays inside the 10 s install.sh gives an old process to exit.
+	shutdown := func() {
+		cancel()
+		_ = ui.Shutdown(context.Background())
+		select {
+		case <-loopDone:
+		case <-time.After(shutdownWait):
+			log.Warn("sync loop did not stop in time; exiting anyway")
+		}
+	}
 
 	// A signal (Ctrl+C, or a service manager stopping the process) shuts
 	// down the same way the tray's own Quit item does.
@@ -123,15 +144,11 @@ func run(log *slog.Logger) error {
 	defer stopSignals()
 	go func() {
 		<-sigCtx.Done()
-		cancel()
-		_ = ui.Shutdown(context.Background())
+		shutdown()
 		os.Exit(0)
 	}()
 
-	if err := trayapp.Run(settingsURL, cfg.EffectiveCabinetURL(), &st, func() {
-		cancel()
-		_ = ui.Shutdown(context.Background())
-	}, log); err != nil {
+	if err := trayapp.Run(settingsURL, cfg.EffectiveCabinetURL(), &st, shutdown, log); err != nil {
 		return fmt.Errorf("tray: %w", err)
 	}
 	return nil

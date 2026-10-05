@@ -6,6 +6,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/gate4ai/sync/internal/webdavclient"
 )
@@ -109,27 +111,39 @@ func SyncOnce(ctx context.Context, dav *webdavclient.Client, localDir, manifestP
 		}
 	}
 
-	for _, op := range Plan(local, remote, manifest) {
+	// The manifest is saved even when an operation fails part way through
+	// the plan (including the context being cancelled on shutdown): a record
+	// only enters it after its transfer is confirmed, so what the completed
+	// operations wrote is true, and the next poll need not redo them.
+	opErr := apply(ctx, dav, localDir, Plan(local, remote, manifest), remote, manifest, &res)
+	if err := Save(manifestPath, manifest); err != nil && opErr == nil {
+		return res, fmt.Errorf("save manifest: %w", err)
+	}
+	return res, opErr
+}
+
+func apply(ctx context.Context, dav *webdavclient.Client, localDir string, ops []Op, remote map[string]RemoteState, manifest Manifest, res *Result) error {
+	for _, op := range ops {
 		switch op.Kind {
 		case OpUpload:
 			if err := upload(ctx, dav, localDir, op.Path, manifest); err != nil {
-				return res, fmt.Errorf("upload %q: %w", op.Path, err)
+				return fmt.Errorf("upload %q: %w", op.Path, err)
 			}
 			res.Uploaded++
 		case OpDownload:
 			if err := download(ctx, dav, localDir, op.Path, remote[op.Path], manifest); err != nil {
-				return res, fmt.Errorf("download %q: %w", op.Path, err)
+				return fmt.Errorf("download %q: %w", op.Path, err)
 			}
 			res.Downloaded++
 		case OpDeleteLocal:
 			if err := os.Remove(filepath.Join(localDir, filepath.FromSlash(op.Path))); err != nil && !os.IsNotExist(err) {
-				return res, fmt.Errorf("delete local %q: %w", op.Path, err)
+				return fmt.Errorf("delete local %q: %w", op.Path, err)
 			}
 			delete(manifest, op.Path)
 			res.DeletedLocal++
 		case OpDeleteRemote:
 			if err := dav.Delete(ctx, op.Path); err != nil {
-				return res, fmt.Errorf("delete remote %q: %w", op.Path, err)
+				return fmt.Errorf("delete remote %q: %w", op.Path, err)
 			}
 			delete(manifest, op.Path)
 			res.DeletedRemote++
@@ -137,11 +151,60 @@ func SyncOnce(ctx context.Context, dav *webdavclient.Client, localDir, manifestP
 			delete(manifest, op.Path)
 		}
 	}
+	return nil
+}
 
-	if err := Save(manifestPath, manifest); err != nil {
-		return res, fmt.Errorf("save manifest: %w", err)
+// tempPrefix starts the name of every file this package writes before
+// renaming it into place. A process killed between the two leaves one
+// behind; scanLocal neither syncs it (it would upload a half-written copy)
+// nor keeps it.
+const tempPrefix = ".gate4ai-sync-"
+
+func isTemp(name string) bool { return strings.HasPrefix(name, tempPrefix) }
+
+// writeAtomic puts data at path so that the file there is, at every moment,
+// either what it was before or all of data with mtime set — never a
+// truncated copy with a fresh mtime, which the next poll would read as a
+// local edit newer than the server's and upload over the good version. A
+// zero mtime leaves the write time.
+func writeAtomic(path string, data []byte, mtime time.Time) (err error) {
+	f, err := os.CreateTemp(filepath.Dir(path), tempPrefix+"*")
+	if err != nil {
+		return err
 	}
-	return res, nil
+	tmp := f.Name()
+	defer func() {
+		if err != nil {
+			_ = os.Remove(tmp)
+		}
+	}()
+	// Keep the mode of a file being replaced; CreateTemp's own 0600 is the
+	// same mode a new file used to get.
+	if info, statErr := os.Stat(path); statErr == nil {
+		if err := f.Chmod(info.Mode().Perm()); err != nil {
+			_ = f.Close()
+			return err
+		}
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return err
+	}
+	// Without this, a power cut after the rename can leave the new name
+	// pointing at blocks that were never written.
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if !mtime.IsZero() {
+		if err := os.Chtimes(tmp, mtime, mtime); err != nil {
+			return err
+		}
+	}
+	return os.Rename(tmp, path)
 }
 
 func scanLocal(dir string) (map[string]LocalState, error) {
@@ -151,6 +214,15 @@ func scanLocal(dir string) (map[string]LocalState, error) {
 			return err
 		}
 		if d.IsDir() {
+			return nil
+		}
+		if isTemp(d.Name()) {
+			// Left by a process that was killed mid-write: this package is
+			// the only writer of such files and runs one folder at a time, so
+			// none of them belongs to a write still in progress.
+			if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("remove leftover temporary file: %w", err)
+			}
 			return nil
 		}
 		rel, err := filepath.Rel(dir, p)
@@ -206,13 +278,8 @@ func download(ctx context.Context, dav *webdavclient.Client, localDir, clientPat
 	if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
 		return fmt.Errorf("create local directory: %w", err)
 	}
-	if err := os.WriteFile(full, body, 0o600); err != nil {
+	if err := writeAtomic(full, body, remote.ModTime); err != nil {
 		return fmt.Errorf("write local file: %w", err)
-	}
-	if !remote.ModTime.IsZero() {
-		if err := os.Chtimes(full, remote.ModTime, remote.ModTime); err != nil {
-			return fmt.Errorf("set local mtime: %w", err)
-		}
 	}
 	info, err := os.Stat(full)
 	if err != nil {
