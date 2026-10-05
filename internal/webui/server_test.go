@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -93,6 +94,20 @@ func (f *fixture) url(path string) string {
 	return "http://" + f.srv.Addr() + path
 }
 
+// postForm posts like http.PostForm, following redirects within this
+// server but stopping at one that leaves it — the cabinet's /link page an
+// unlinked client is sent to. Following that would make the test depend on
+// the network and on gate4.ai being up.
+func (f *fixture) postForm(target string, form url.Values) (*http.Response, error) {
+	client := &http.Client{CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		if req.URL.Host != via[0].URL.Host {
+			return http.ErrUseLastResponse
+		}
+		return nil
+	}}
+	return client.PostForm(target, form)
+}
+
 func TestHomeShowsUnlinkedState(t *testing.T) {
 	f := newFixture(t)
 	resp, err := http.Get(f.url("/"))
@@ -171,7 +186,7 @@ func TestAddFolderThenHomeListsIt(t *testing.T) {
 	f := newFixture(t)
 	dir := t.TempDir()
 
-	resp, err := http.PostForm(f.url("/folders"), map[string][]string{"path": {dir}})
+	resp, err := f.postForm(f.url("/folders"), map[string][]string{"path": {dir}})
 	if err != nil {
 		t.Fatalf("POST /folders: %v", err)
 	}
@@ -262,7 +277,7 @@ func TestAddingTheSameFolderTwiceIsANoOp(t *testing.T) {
 	dir := t.TempDir()
 
 	for range 2 {
-		resp, err := http.PostForm(f.url("/folders"), map[string][]string{"path": {dir}})
+		resp, err := f.postForm(f.url("/folders"), map[string][]string{"path": {dir}})
 		if err != nil {
 			t.Fatalf("POST /folders: %v", err)
 		}
@@ -281,7 +296,7 @@ func TestAddingAFileRatherThanADirectoryIsRefused(t *testing.T) {
 	}
 	_ = file.Close()
 
-	resp, err := http.PostForm(f.url("/folders"), map[string][]string{"path": {file.Name()}})
+	resp, err := f.postForm(f.url("/folders"), map[string][]string{"path": {file.Name()}})
 	if err != nil {
 		t.Fatalf("POST /folders: %v", err)
 	}
@@ -298,7 +313,7 @@ func TestRemovingARegisteredFolderDisablesItsMountFirst(t *testing.T) {
 	f := newFixture(t)
 	f.cfg.Folders = []config.Folder{{ID: "folder-1", Path: "/tmp/x", Username: "u", Secret: "s", Slug: "x"}}
 
-	resp, err := http.PostForm(f.url("/folders/remove"), map[string][]string{"id": {"folder-1"}})
+	resp, err := f.postForm(f.url("/folders/remove"), map[string][]string{"id": {"folder-1"}})
 	if err != nil {
 		t.Fatalf("POST /folders/remove: %v", err)
 	}
@@ -316,7 +331,7 @@ func TestRemovingAnUnregisteredFolderSkipsTheNetworkCall(t *testing.T) {
 	f := newFixture(t)
 	f.cfg.Folders = []config.Folder{{ID: "folder-1", Path: "/tmp/x"}}
 
-	resp, err := http.PostForm(f.url("/folders/remove"), map[string][]string{"id": {"folder-1"}})
+	resp, err := f.postForm(f.url("/folders/remove"), map[string][]string{"id": {"folder-1"}})
 	if err != nil {
 		t.Fatalf("POST /folders/remove: %v", err)
 	}
@@ -467,7 +482,7 @@ func TestRemoveFailureShowsAnErrorPageAndKeepsTheFolder(t *testing.T) {
 	f.cfg.Folders = []config.Folder{{ID: "folder-1", Path: "/tmp/x", Username: "u", Secret: "s", Slug: "x"}}
 	f.control.disableErr = errors.New("boom")
 
-	resp, err := http.PostForm(f.url("/folders/remove"), map[string][]string{"id": {"folder-1"}})
+	resp, err := f.postForm(f.url("/folders/remove"), map[string][]string{"id": {"folder-1"}})
 	if err != nil {
 		t.Fatalf("POST /folders/remove: %v", err)
 	}
@@ -560,7 +575,7 @@ func TestPastedPathWithQuotesIsAccepted(t *testing.T) {
 		t.Errorf("quoted path did not open the folder:\n%s", b)
 	}
 
-	add, err := http.PostForm(f.url("/folders"), map[string][]string{"path": {`"` + dir + `"`}})
+	add, err := f.postForm(f.url("/folders"), map[string][]string{"path": {`"` + dir + `"`}})
 	if err != nil {
 		t.Fatalf("POST /folders: %v", err)
 	}
@@ -660,7 +675,7 @@ func TestSyncingAWholeVolumeAsksFirst(t *testing.T) {
 	f := newFixture(t)
 	root := volumeRoot(t.TempDir())
 
-	resp, err := http.PostForm(f.url("/folders"), map[string][]string{"path": {root}})
+	resp, err := f.postForm(f.url("/folders"), map[string][]string{"path": {root}})
 	if err != nil {
 		t.Fatalf("POST /folders: %v", err)
 	}
@@ -682,7 +697,7 @@ func TestConfirmedBroadFolderIsAdded(t *testing.T) {
 	f := newFixture(t)
 	root := volumeRoot(t.TempDir())
 
-	resp, err := http.PostForm(f.url("/folders"), map[string][]string{"path": {root}, "confirmed": {"1"}})
+	resp, err := f.postForm(f.url("/folders"), map[string][]string{"path": {root}, "confirmed": {"1"}})
 	if err != nil {
 		t.Fatalf("POST /folders: %v", err)
 	}
@@ -698,7 +713,7 @@ func TestSyncingTheHomeFolderAsksFirst(t *testing.T) {
 	home := t.TempDir()
 	setHome(t, home)
 
-	resp, err := http.PostForm(f.url("/folders"), map[string][]string{"path": {home}})
+	resp, err := f.postForm(f.url("/folders"), map[string][]string{"path": {home}})
 	if err != nil {
 		t.Fatalf("POST /folders: %v", err)
 	}
@@ -726,7 +741,7 @@ func TestSyncingAFolderThatOverlapsASyncedOneAsksFirst(t *testing.T) {
 		f := newFixture(t)
 		f.cfg.Folders = []config.Folder{{ID: "f1", Path: inner}}
 
-		resp, err := http.PostForm(f.url("/folders"), map[string][]string{"path": {dir}})
+		resp, err := f.postForm(f.url("/folders"), map[string][]string{"path": {dir}})
 		if err != nil {
 			t.Fatalf("POST /folders: %v", err)
 		}
@@ -747,7 +762,7 @@ func TestSyncingAFolderThatOverlapsASyncedOneAsksFirst(t *testing.T) {
 		f := newFixture(t)
 		f.cfg.Folders = []config.Folder{{ID: "f1", Path: dir}}
 
-		resp, err := http.PostForm(f.url("/folders"), map[string][]string{"path": {inner}})
+		resp, err := f.postForm(f.url("/folders"), map[string][]string{"path": {inner}})
 		if err != nil {
 			t.Fatalf("POST /folders: %v", err)
 		}
@@ -804,5 +819,159 @@ func TestBrowseMarksTheOpenFolderWhenItIsAlreadySynced(t *testing.T) {
 	}
 	if !strings.Contains(string(b), "Already syncing") {
 		t.Errorf("the open folder is not marked as synced:\n%s", b)
+	}
+}
+
+func TestStartFallsBackWhenPreferredAddrTaken(t *testing.T) {
+	var lc net.ListenConfig
+	taken, err := lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer taken.Close()
+
+	s := &webui.Server{PreferredAddr: taken.Addr().String(), Log: slog.New(slog.DiscardHandler)}
+	if err := s.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Shutdown(t.Context()) })
+	if s.Addr() == taken.Addr().String() {
+		t.Fatalf("Addr = %s, want a different port than the taken one", s.Addr())
+	}
+
+	free := taken.Addr().String()
+	taken.Close()
+	s2 := &webui.Server{PreferredAddr: free, Log: slog.New(slog.DiscardHandler)}
+	if err := s2.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() { _ = s2.Shutdown(t.Context()) })
+	if s2.Addr() != free {
+		t.Fatalf("Addr = %s, want the preferred %s", s2.Addr(), free)
+	}
+}
+
+// send makes a request with the headers a browser would add, and does not
+// follow redirects, so the guard's own answer is what the test sees.
+func (f *fixture) send(t *testing.T, method, path, host string, header map[string]string, form url.Values) *http.Response {
+	t.Helper()
+	var body io.Reader
+	if form != nil {
+		body = strings.NewReader(form.Encode())
+	}
+	req, err := http.NewRequestWithContext(t.Context(), method, f.url(path), body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if form != nil {
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	}
+	if host != "" {
+		req.Host = host
+	}
+	for k, v := range header {
+		req.Header.Set(k, v)
+	}
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("%s %s: %v", method, path, err)
+	}
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	return resp
+}
+
+// A DNS-rebinding page reaches the loopback server under its own domain:
+// the browser sends that domain as Host. It must not get the folder list.
+func TestGuardRejectsForeignHost(t *testing.T) {
+	f := newFixture(t)
+	_, port, _ := net.SplitHostPort(f.srv.Addr())
+	for _, path := range []string{"/", "/browse?path=" + url.QueryEscape(t.TempDir())} {
+		resp := f.send(t, http.MethodGet, path, "evil.example:"+port, nil, nil)
+		if resp.StatusCode != http.StatusMisdirectedRequest {
+			t.Errorf("GET %s with a foreign Host: status %d, want %d", path, resp.StatusCode, http.StatusMisdirectedRequest)
+		}
+	}
+	dir := t.TempDir()
+	resp := f.send(t, http.MethodPost, "/folders", "evil.example:"+port, nil, url.Values{"path": {dir}, "confirmed": {"1"}})
+	if resp.StatusCode != http.StatusMisdirectedRequest || len(f.cfg.Folders) != 0 {
+		t.Errorf("POST with a foreign Host: status %d, folders %+v; want %d and none", resp.StatusCode, f.cfg.Folders, http.StatusMisdirectedRequest)
+	}
+}
+
+func TestGuardAllowsLocalhostAndLoopbackHost(t *testing.T) {
+	f := newFixture(t)
+	_, port, _ := net.SplitHostPort(f.srv.Addr())
+	for _, host := range []string{"127.0.0.1:" + port, "localhost:" + port, "LOCALHOST:" + port} {
+		if resp := f.send(t, http.MethodGet, "/", host, nil, nil); resp.StatusCode != http.StatusOK {
+			t.Errorf("GET / with Host %s: status %d, want 200", host, resp.StatusCode)
+		}
+	}
+}
+
+// A form on another site posting to the settings server — the CSRF case —
+// must not add or remove a folder, confirmed=1 or not.
+func TestGuardRejectsCrossSitePost(t *testing.T) {
+	cases := map[string]map[string]string{
+		"Sec-Fetch-Site cross-site": {"Sec-Fetch-Site": "cross-site", "Origin": "https://evil.example"},
+		"Sec-Fetch-Site same-site":  {"Sec-Fetch-Site": "same-site"},
+		"foreign Origin only":       {"Origin": "https://evil.example"},
+		"opaque Origin":             {"Origin": "null"},
+	}
+	for name, header := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			dir := t.TempDir()
+			resp := f.send(t, http.MethodPost, "/folders", "", header, url.Values{"path": {dir}, "confirmed": {"1"}})
+			if resp.StatusCode != http.StatusForbidden {
+				t.Errorf("status %d, want %d", resp.StatusCode, http.StatusForbidden)
+			}
+			if len(f.cfg.Folders) != 0 {
+				t.Errorf("folder was added: %+v", f.cfg.Folders)
+			}
+
+			f.cfg.Folders = []config.Folder{{ID: "f1", Path: dir}}
+			resp = f.send(t, http.MethodPost, "/folders/remove", "", header, url.Values{"id": {"f1"}})
+			if resp.StatusCode != http.StatusForbidden || len(f.cfg.Folders) != 1 {
+				t.Errorf("remove: status %d, folders %+v; want %d and the folder kept", resp.StatusCode, f.cfg.Folders, http.StatusForbidden)
+			}
+		})
+	}
+}
+
+// The settings page's own forms still work, as a browser sends them.
+func TestGuardAllowsSameOriginPost(t *testing.T) {
+	f := newFixture(t)
+	dir := t.TempDir()
+	header := map[string]string{"Sec-Fetch-Site": "same-origin", "Origin": "http://" + f.srv.Addr()}
+	resp := f.send(t, http.MethodPost, "/folders", "", header, url.Values{"path": {dir}})
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Errorf("status %d, want %d", resp.StatusCode, http.StatusSeeOther)
+	}
+	if len(f.cfg.Folders) != 1 {
+		t.Errorf("Folders = %+v, want the one posted", f.cfg.Folders)
+	}
+}
+
+func TestGuardForbidsFraming(t *testing.T) {
+	f := newFixture(t)
+	resp := f.send(t, http.MethodGet, "/", "", nil, nil)
+	if got := resp.Header.Get("X-Frame-Options"); got != "DENY" {
+		t.Errorf("X-Frame-Options = %q, want DENY", got)
+	}
+	if got := resp.Header.Get("Content-Security-Policy"); got != "frame-ancestors 'none'" {
+		t.Errorf("Content-Security-Policy = %q", got)
+	}
+}
+
+// GET /instance is how "gate4ai-sync url" knows the client on the recorded
+// port is the one that recorded it.
+func TestInstanceAnswersWithItsToken(t *testing.T) {
+	f := newFixture(t)
+	f.srv.InstanceToken = "tok-123"
+	resp := f.send(t, http.MethodGet, "/instance", "", nil, nil)
+	b, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK || string(b) != "tok-123" {
+		t.Errorf("GET /instance = %d %q, want 200 %q", resp.StatusCode, b, "tok-123")
 	}
 }

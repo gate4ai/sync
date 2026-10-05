@@ -66,8 +66,12 @@ server.
 ## How it works
 
 1. The first launch creates a tray icon with a single menu item — "Open settings".
-2. Clicking it opens a local settings page in the browser (`http://127.0.0.1:<port>/`) — the
-   client has no GUI of its own, all configuration happens through the browser.
+2. Clicking it opens a local settings page in the browser (`http://127.0.0.1:23456/`, or a
+   random port when 23456 is taken) — the client has no GUI of its own, all configuration
+   happens through the browser. Until the client is linked, a launch opens the page on its
+   own; since that browser window does not always come to the front, the installer (and a
+   launch from a terminal) also prints the address, and `gate4ai-sync url` prints it for a
+   running instance at any time.
 3. There you pick local folders to sync (a plain HTML picker over `os.ReadDir`, no native
    dialogs) and press "Sync" — on an unlinked client this goes straight on to
    `https://gate4.ai/link?client=<id>`, where the installation gets attached to the

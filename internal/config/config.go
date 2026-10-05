@@ -256,6 +256,18 @@ func ManifestPath(folderID string) (string, error) {
 	return filepath.Join(d, "manifests", folderID+".json"), nil
 }
 
+// UIURLPath is where a running instance records the address of its
+// settings page, for the installer and for "gate4ai-sync url" to print —
+// the browser it opens on its own does not always come to the front, and
+// the address is not otherwise visible anywhere. Removed on a clean exit.
+func UIURLPath() (string, error) {
+	d, err := dir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(d, "ui-url"), nil
+}
+
 // Load reads the config file, creating a fresh one (with a new ClientID) if
 // none exists yet.
 func Load() (*Config, error) {
