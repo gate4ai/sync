@@ -44,7 +44,7 @@ func Load(path string) (Manifest, error) {
 		// the folder syncing until someone deleted the file by hand;
 		// starting over as a first sync is safe instead, since nothing is
 		// deleted on either side without a record saying it was synced.
-		return Manifest{}, nil
+		return Manifest{}, nil //nolint:nilerr // starting over is the recovery, see above
 	}
 	return m, nil
 }
