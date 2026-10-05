@@ -22,6 +22,8 @@ import (
 // shape internal/webdav (gate4ai/server) uses.
 type fakeServer struct {
 	files map[string][]byte
+	// failPut names a path whose PUT is refused, to break a plan part way.
+	failPut string
 }
 
 func newFakeServer(t *testing.T) (*httptest.Server, *fakeServer) {
@@ -48,6 +50,10 @@ func (fs *fakeServer) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		_, _ = w.Write(body)
 	case http.MethodPut:
+		if p == fs.failPut {
+			http.Error(w, "refused", http.StatusInternalServerError)
+			return
+		}
 		body, _ := io.ReadAll(r.Body)
 		fs.files[p] = body
 		w.WriteHeader(http.StatusCreated)
@@ -286,5 +292,172 @@ func TestSyncOnceDeletesLocallyAfterARemoteDeletion(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "a.md")); !os.IsNotExist(err) {
 		t.Error("local file still exists after the remote deletion propagated")
+	}
+}
+
+// A process killed between writing a download and renaming it into place
+// leaves a temporary file and the user's previous copy. The next poll must
+// neither upload that half-written file nor let it stand in for the real
+// one, and must clear it away.
+func TestSyncOnceIgnoresAndRemovesADownloadLeftByAKilledProcess(t *testing.T) {
+	srv, fs := newFakeServer(t)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.md"), []byte("v1"), 0o600); err != nil {
+		t.Fatalf("write local file: %v", err)
+	}
+	manifest := filepath.Join(t.TempDir(), "manifest.json")
+	client := newClient(srv.URL)
+	if _, err := syncengine.SyncOnce(t.Context(), client, dir, manifest, syncengine.AcceptAll{}); err != nil {
+		t.Fatalf("first SyncOnce: %v", err)
+	}
+
+	fs.files["a.md"] = []byte("version two")
+	fs.files["new.md"] = []byte("brand new")
+	leftovers := []string{
+		filepath.Join(dir, ".gate4ai-sync-123"),
+		filepath.Join(dir, "sub", ".gate4ai-sync-456"),
+	}
+	if err := os.Mkdir(filepath.Join(dir, "sub"), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	for _, p := range leftovers {
+		if err := os.WriteFile(p, []byte("vers"), 0o600); err != nil {
+			t.Fatalf("write leftover: %v", err)
+		}
+	}
+
+	res, err := syncengine.SyncOnce(t.Context(), client, dir, manifest, syncengine.AcceptAll{})
+	if err != nil {
+		t.Fatalf("second SyncOnce: %v", err)
+	}
+	if res != (syncengine.Result{Downloaded: 2}) {
+		t.Errorf("res = %+v, want just the two downloads", res)
+	}
+	for p := range fs.files {
+		if strings.Contains(p, ".gate4ai-sync-") {
+			t.Errorf("temporary file %q was uploaded", p)
+		}
+	}
+	if string(fs.files["a.md"]) != "version two" {
+		t.Errorf("remote a.md = %q, want the server's version untouched", fs.files["a.md"])
+	}
+	for name, want := range map[string]string{"a.md": "version two", "new.md": "brand new"} {
+		got, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil || string(got) != want {
+			t.Errorf("local %s = %q, %v; want %q", name, got, err, want)
+		}
+	}
+	for _, p := range leftovers {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Errorf("leftover %s was not removed", p)
+		}
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read dir: %v", err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".gate4ai-sync-") {
+			t.Errorf("download left temporary file %s behind", e.Name())
+		}
+	}
+}
+
+func TestSyncOnceDownloadKeepsTheServersMtimeAndTheFilesMode(t *testing.T) {
+	srv, fs := newFakeServer(t)
+	dir := t.TempDir()
+	local := filepath.Join(dir, "a.md")
+	if err := os.WriteFile(local, []byte("v1"), 0o600); err != nil {
+		t.Fatalf("write local file: %v", err)
+	}
+	manifest := filepath.Join(t.TempDir(), "manifest.json")
+	client := newClient(srv.URL)
+	if _, err := syncengine.SyncOnce(t.Context(), client, dir, manifest, syncengine.AcceptAll{}); err != nil {
+		t.Fatalf("first SyncOnce: %v", err)
+	}
+	if err := os.Chmod(local, 0o640); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	// The chmod changed nothing the manifest compares, so the file still
+	// reads as unchanged locally and the server's new version wins.
+	fs.files["a.md"] = []byte("version two")
+
+	if _, err := syncengine.SyncOnce(t.Context(), client, dir, manifest, syncengine.AcceptAll{}); err != nil {
+		t.Fatalf("second SyncOnce: %v", err)
+	}
+	info, err := os.Stat(local)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if want := time.Unix(int64(len("a.md")), 0); !info.ModTime().Equal(want) {
+		t.Errorf("mtime = %v, want the server's %v", info.ModTime(), want)
+	}
+	if info.Mode().Perm() != 0o640 {
+		t.Errorf("mode = %v, want 0640 kept from the replaced file", info.Mode().Perm())
+	}
+}
+
+// A manifest cut short by an older version of this client must not stop
+// the folder syncing: the poll starts over as a first sync and leaves a
+// valid manifest behind.
+func TestSyncOnceRecoversFromATruncatedManifest(t *testing.T) {
+	srv, fs := newFakeServer(t)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.md"), []byte("hello"), 0o600); err != nil {
+		t.Fatalf("write local file: %v", err)
+	}
+	fs.files["b.md"] = []byte("from server")
+	manifest := filepath.Join(t.TempDir(), "manifest.json")
+	if err := os.WriteFile(manifest, []byte(`{"a.md": {"size": 5, "mod_ti`), 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	res, err := syncengine.SyncOnce(t.Context(), newClient(srv.URL), dir, manifest, syncengine.AcceptAll{})
+	if err != nil {
+		t.Fatalf("SyncOnce: %v", err)
+	}
+	if res != (syncengine.Result{Uploaded: 1, Downloaded: 1}) {
+		t.Errorf("res = %+v, want one upload and one download, nothing deleted", res)
+	}
+	m, err := syncengine.Load(manifest)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(m) != 2 {
+		t.Errorf("manifest = %v, want records for a.md and b.md", m)
+	}
+}
+
+// An operation failing part way through the plan — as one does when the
+// context is cancelled on shutdown — still leaves the manifest recording
+// every transfer that did complete, so the next poll does not redo them.
+func TestSyncOnceSavesTheManifestForWhatCompletedBeforeAFailure(t *testing.T) {
+	srv, fs := newFakeServer(t)
+	fs.failPut = "c.md"
+	dir := t.TempDir()
+	for _, name := range []string{"a.md", "b.md", "c.md", "d.md", "e.md"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(name), 0o600); err != nil {
+			t.Fatalf("write local file: %v", err)
+		}
+	}
+	manifest := filepath.Join(t.TempDir(), "manifest.json")
+
+	if _, err := syncengine.SyncOnce(t.Context(), newClient(srv.URL), dir, manifest, syncengine.AcceptAll{}); err == nil {
+		t.Fatal("SyncOnce succeeded although a PUT was refused")
+	}
+	m, err := syncengine.Load(manifest)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(m) != len(fs.files) {
+		t.Errorf("manifest has %d records, server has %d files; want one per completed upload", len(m), len(fs.files))
+	}
+	for p := range fs.files {
+		if _, ok := m[p]; !ok {
+			t.Errorf("uploaded %s has no manifest record", p)
+		}
+	}
+	if _, ok := m["c.md"]; ok {
+		t.Error("the refused upload has a manifest record")
 	}
 }

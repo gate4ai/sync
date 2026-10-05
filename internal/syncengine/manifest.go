@@ -38,16 +38,23 @@ func Load(path string) (Manifest, error) {
 		return nil, err
 	}
 	var m Manifest
-	if err := json.Unmarshal(data, &m); err != nil {
-		return nil, err
+	if err := json.Unmarshal(data, &m); err != nil || m == nil {
+		// Unreadable — a manifest cut short by a version of this client
+		// that did not yet write it atomically. Failing here would stop
+		// the folder syncing until someone deleted the file by hand;
+		// starting over as a first sync is safe instead, since nothing is
+		// deleted on either side without a record saying it was synced.
+		return Manifest{}, nil
 	}
 	return m, nil
 }
 
-// Save writes the manifest, creating its parent directory if needed. Called
-// only after a poll's operations have actually succeeded — see Apply's
-// contract in engine.go: a record written before the transfer it describes
-// is confirmed is the failure mode this whole package exists to avoid.
+// Save writes the manifest, creating its parent directory if needed. A
+// record is added only after the transfer it describes is confirmed — see
+// SyncOnce: a record written before that is the failure mode this whole
+// package exists to avoid. The write is atomic, so a process killed part
+// way through leaves the previous manifest rather than invalid JSON that
+// every later poll would fail to load.
 func Save(path string, m Manifest) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
@@ -56,5 +63,5 @@ func Save(path string, m Manifest) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o600)
+	return writeAtomic(path, data, time.Time{})
 }
